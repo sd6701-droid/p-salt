@@ -1,0 +1,17 @@
+[project]
+name = "rethinking-jepa"
+version = "0.1.0"
+description = "A minimal PyTorch implementation of the two-stage frozen-teacher JEPA recipe from Rethinking JEPA."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.1",
+  "PyYAML>=6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["rethinking_jepa*"]

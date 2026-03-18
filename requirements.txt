@@ -1,0 +1,8 @@
+# From pyproject.toml
+torch>=2.1
+PyYAML>=6.0
+torchvision>=0.16
+av>=13.0
+
+# Install this project in editable mode
+-e .
