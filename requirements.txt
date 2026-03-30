@@ -3,6 +3,9 @@ torch>=2.1
 PyYAML>=6.0
 torchvision>=0.16
 av>=13.0
+datasets>=4.0
+torchcodec>=0.1
+wandb>=0.18
 
 # Install this project in editable mode
 -e .

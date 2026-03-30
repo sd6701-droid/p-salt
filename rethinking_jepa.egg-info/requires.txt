@@ -1,2 +1,4 @@
 torch>=2.1
 PyYAML>=6.0
+datasets>=4.0
+torchcodec>=0.1

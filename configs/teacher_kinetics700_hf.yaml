@@ -1,0 +1,51 @@
+app: rethinking_jepa.train
+
+data:
+  source: huggingface
+  repo_id: bitmind/Kinetics-700
+  config_name: default
+  split: train
+  video_column: video
+  max_samples: 1000
+  sample_seed: 0
+  shuffle_buffer_size: 512
+  decode_threads: 0
+  num_samples: 64
+  frames: 16
+  frame_step: 4
+  image_size: 64
+  input_size: 224
+
+augmentation:
+  random_resize_aspect_ratio: [0.75, 1.35]
+  random_resize_scale: [0.3, 1.0]
+
+masking:
+  short_spatial_mask_scale: 0.15
+  long_spatial_mask_scale: 0.7
+  temporal_mask_scale: 1.0
+  mask_aspect_ratio: [0.75, 1.5]
+
+model:
+  architecture: vit_small
+  in_channels: 3
+  tubelet_size: 2
+  patch_size: 16
+
+optimizer:
+  start_lr: 0.0002
+  lr: 0.000625
+  final_lr: 0.000001
+  start_weight_decay: 0.04
+  end_weight_decay: 0.4
+  clip_grad: 0.02
+  warmup_steps: 10000
+  betas: [0.9, 0.95]
+
+train:
+  global_batch_size: 3072
+  device_batch_size: 2
+  num_workers: 0
+  steps_per_epoch_scale: 1
+  max_steps: 5
+  checkpoint_path: teacher_vit_small_kinetics700_hf.pt

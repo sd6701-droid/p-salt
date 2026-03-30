@@ -6,6 +6,8 @@ Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: torch>=2.1
 Requires-Dist: PyYAML>=6.0
+Requires-Dist: datasets>=4.0
+Requires-Dist: torchcodec>=0.1
 
 # Rethinking JEPA
 
@@ -18,6 +20,12 @@ It follows the paper's high-level recipe:
 2. Freeze the teacher.
 3. Train a student JEPA model to predict the teacher's masked latents.
 
+The configs now include the main Table 5 training values from the paper:
+`16` frames, frame step `4`, input resolution `224`, random resized crop
+augmentation, short/long spatial block masking, cosine learning rate scheduling,
+warmup, AdamW betas `(0.9, 0.95)`, gradient clipping, and scheduled weight
+decay.
+
 The implementation is intentionally small, but the module boundaries mirror the
 usual V-JEPA style split so we can evolve it toward `facebookresearch/vjepa2`
 components later.
@@ -26,7 +34,7 @@ components later.
 
 - `rethinking_jepa/models.py`: video patch embedder, transformer encoder, decoder, predictor
 - `rethinking_jepa/masking.py`: token-mask sampling utilities
-- `rethinking_jepa/data.py`: synthetic video dataset for smoke tests
+- `rethinking_jepa/data.py`: synthetic dataset plus real-video manifest/folder loaders
 - `train_teacher.py`: stage-1 masked reconstruction pretraining
 - `train_student.py`: stage-2 frozen-teacher JEPA training
 
@@ -37,5 +45,89 @@ python3 train_teacher.py --config configs/teacher.yaml
 python3 train_student.py --config configs/student.yaml
 ```
 
+To try another ViT backbone, swap the config:
+
+```bash
+python3 train_teacher.py --config configs/teacher_vit_base.yaml
+python3 train_student.py --config configs/student_vit_base.yaml
+python3 test_architectures.py --config configs/teacher.yaml --architectures vit_tiny vit_small vit_base
+```
+
 By default both scripts use a synthetic dataset, which makes it easy to test the
 training code path before wiring in a real video loader.
+
+To point training at real video files, use one of the example configs:
+
+```bash
+python3 train_teacher.py --config configs/teacher_real_video.yaml
+python3 train_teacher.py --config configs/teacher_v36m_mixture.yaml
+python3 train_student.py --config configs/student_v36m_mixture.yaml
+```
+
+To stream a manageable subset of the Hugging Face `bitmind/Kinetics-700` dataset directly during training:
+
+```bash
+python3 train_teacher.py --config configs/teacher_kinetics700_hf.yaml
+python3 train_student.py --config configs/student_kinetics700_hf.yaml
+```
+
+Those configs keep the run bounded with `max_samples: 1000`, so only a shuffled subset is consumed on the fly.
+
+If you prefer to materialize a local subset first:
+
+```bash
+python3 prepare_kinetics700_subset.py --max-videos 1000
+python3 train_teacher.py --config configs/teacher_kinetics700_subset.yaml
+python3 train_student.py --config configs/student_kinetics700_subset.yaml
+```
+
+The real-video loader supports:
+
+- `data.source: real`: read videos from a single `root` directory or `manifest`
+- `data.source: huggingface`: stream videos directly from a Hugging Face dataset repo
+- `data.source: mixture`: concatenate multiple datasets listed under `data.datasets`
+- manifest files in `.txt` format (one path per line) or `.csv` format with a `path` column
+- optional `max_samples` and `sample_seed` to train on a partial subset of a larger dataset
+
+## Datasets From The Paper
+
+The paper's pretraining data mixture is:
+
+- `Kinetics-710 (K710)`: Kinetics-400/600/700 merged, with validation samples removed
+- `Something-Something V2 (SSV2)`
+- `Panda70M` 2.8M-video subset
+- combined as `V-3.6M`
+
+The paper's frozen-backbone evaluation datasets are:
+
+- `Kinetics-400`
+- `Something-Something V2`
+- `COIN`
+- `Jester`
+- `Diving48`
+- `ImageNet-1K` using repeated frames
+
+This repo now includes config scaffolding to train on those paper-style pretraining datasets once you provide
+your own local manifests or dataset roots.
+
+## Hugging Face Kinetics-700
+
+The public `bitmind/Kinetics-700` dataset on Hugging Face currently exposes a single `train` split with
+roughly `491,660` rows and a `video` column. In practice this is too large for a quick local experiment, so
+this repo now supports two practical options:
+
+- direct streaming from Hugging Face with `data.source: huggingface`
+- local subset extraction with `prepare_kinetics700_subset.py`
+
+For Hugging Face streaming, install dependencies from `requirements.txt`. The `datasets` docs note that
+video columns are decoded through `torchcodec`, and `ffmpeg` must also be available on your system.
+
+## Notes
+
+- `global_batch_size: 3072` is tracked in the config to match the paper, while
+  `device_batch_size` stays small enough for a local run.
+- The repo still uses a synthetic dataset for smoke tests, so this is closer to
+  the paper's training recipe but not yet a full reproduction.
+- Each architecture writes a different checkpoint file so switching between
+  `vit_small` and `vit_base` does not reuse incompatible weights by accident.
+# p-salt

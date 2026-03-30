@@ -1,0 +1,369 @@
+from __future__ import annotations
+
+import csv
+import math
+import random
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import torch
+import torch.nn.functional as F
+from torch.utils.data import Dataset, IterableDataset
+
+DEFAULT_KINETICS700_TRAIN_ANNOTATION_URL = "https://s3.amazonaws.com/kinetics/700_2020/annotations/train.csv"
+
+
+@dataclass
+class VideoAugmentationConfig:
+    input_size: int
+    random_resize_aspect_ratio: tuple[float, float]
+    random_resize_scale: tuple[float, float]
+
+
+def random_resized_crop_video(
+    video: torch.Tensor,
+    config: VideoAugmentationConfig,
+) -> torch.Tensor:
+    _, _, height, width = video.shape
+    area = height * width
+    scale = random.uniform(*config.random_resize_scale)
+    aspect_ratio = random.uniform(*config.random_resize_aspect_ratio)
+    crop_h = int(round(math.sqrt(area * scale / aspect_ratio)))
+    crop_w = int(round(math.sqrt(area * scale * aspect_ratio)))
+    crop_h = max(1, min(height, crop_h))
+    crop_w = max(1, min(width, crop_w))
+    top = 0 if crop_h == height else random.randint(0, height - crop_h)
+    left = 0 if crop_w == width else random.randint(0, width - crop_w)
+    cropped = video[:, :, top : top + crop_h, left : left + crop_w]
+    resized = F.interpolate(
+        cropped.permute(1, 0, 2, 3),
+        size=(config.input_size, config.input_size),
+        mode="bilinear",
+        align_corners=False,
+    )
+    return resized.permute(1, 0, 2, 3).contiguous()
+
+
+class SyntheticVideoDataset(Dataset[torch.Tensor]):
+    def __init__(
+        self,
+        num_samples: int,
+        channels: int,
+        frames: int,
+        frame_step: int,
+        height: int,
+        width: int,
+        augmentation: VideoAugmentationConfig | None = None,
+    ) -> None:
+        self.num_samples = num_samples
+        self.channels = channels
+        self.frames = frames
+        self.frame_step = frame_step
+        self.height = height
+        self.width = width
+        self.augmentation = augmentation
+
+    def __len__(self) -> int:
+        return self.num_samples
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        full_frames = self.frames * self.frame_step
+        t = torch.linspace(0, 1, full_frames)
+        grid_y = torch.linspace(-1, 1, self.height)
+        grid_x = torch.linspace(-1, 1, self.width)
+        yy, xx = torch.meshgrid(grid_y, grid_x, indexing="ij")
+        base = torch.stack(
+            [
+                torch.sin(2 * math.pi * (xx + t_i)) + torch.cos(2 * math.pi * yy)
+                for t_i in t
+            ],
+            dim=0,
+        )
+        video = base.unsqueeze(0).repeat(self.channels, 1, 1, 1)
+        noise = 0.05 * torch.randn_like(video)
+        video = (video + noise)[:, :: self.frame_step].float()
+        if self.augmentation is not None:
+            video = random_resized_crop_video(video, self.augmentation)
+        return video
+
+
+class VideoFileDataset(Dataset[torch.Tensor]):
+    def __init__(
+        self,
+        video_paths: list[Path],
+        channels: int,
+        frames: int,
+        frame_step: int,
+        image_size: int,
+        augmentation: VideoAugmentationConfig | None = None,
+    ) -> None:
+        if not video_paths:
+            raise ValueError("VideoFileDataset requires at least one video path")
+        self.video_paths = video_paths
+        self.channels = channels
+        self.frames = frames
+        self.frame_step = frame_step
+        self.image_size = image_size
+        self.augmentation = augmentation
+
+    def __len__(self) -> int:
+        return len(self.video_paths)
+
+    def _sample_clip(self, video: torch.Tensor) -> torch.Tensor:
+        video = video.float() / 255.0
+        total_frames = self.frames * self.frame_step
+        if video.size(0) >= total_frames:
+            max_start = video.size(0) - total_frames
+            start = 0 if max_start == 0 else random.randint(0, max_start)
+            video = video[start : start + total_frames : self.frame_step]
+        else:
+            if video.size(0) == 0:
+                raise ValueError("Encountered a video with zero frames")
+            indices = torch.linspace(0, video.size(0) - 1, self.frames).round().long()
+            video = video.index_select(0, indices)
+        return video.permute(3, 0, 1, 2).contiguous()
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        try:
+            from torchvision.io import read_video
+        except ImportError as exc:
+            raise ImportError(
+                "Local video loading requires torchvision video I/O support. "
+                "Your current torchvision build does not expose torchvision.io.read_video. "
+                "Use data.source='huggingface' for streaming, or install a torchvision build "
+                "with video support for local file decoding."
+            ) from exc
+        path = self.video_paths[index]
+        video, _, _ = read_video(str(path), pts_unit="sec")
+        clip = self._sample_clip(video)
+        if self.augmentation is not None:
+            clip = random_resized_crop_video(clip, self.augmentation)
+        else:
+            clip = F.interpolate(
+                clip.permute(1, 0, 2, 3),
+                size=(self.image_size, self.image_size),
+                mode="bilinear",
+                align_corners=False,
+            ).permute(1, 0, 2, 3).contiguous()
+        if clip.size(0) != self.channels:
+            if clip.size(0) == 1 and self.channels == 3:
+                clip = clip.expand(3, -1, -1, -1)
+            else:
+                raise ValueError(
+                    f"Expected {self.channels} channels but decoded {clip.size(0)} from {path}"
+                )
+        return clip
+
+
+class HuggingFaceVideoDataset(IterableDataset[torch.Tensor]):
+    def __init__(
+        self,
+        repo_id: str,
+        split: str,
+        channels: int,
+        frames: int,
+        frame_step: int,
+        image_size: int,
+        augmentation: VideoAugmentationConfig | None = None,
+        config_name: str | None = None,
+        video_column: str = "video",
+        max_samples: int | None = None,
+        sample_seed: int = 0,
+        shuffle_buffer_size: int = 256,
+        decode_threads: int = 0,
+        class_names: list[str] | None = None,
+        class_fraction: float | None = None,
+        annotation_csv_url: str | None = None,
+        annotation_csv_path: str | None = None,
+        skip_decode_errors: bool = True,
+    ) -> None:
+        self.repo_id = repo_id
+        self.split = split
+        self.channels = channels
+        self.frames = frames
+        self.frame_step = frame_step
+        self.image_size = image_size
+        self.augmentation = augmentation
+        self.config_name = config_name
+        self.video_column = video_column
+        self.max_samples = max_samples
+        self.sample_seed = sample_seed
+        self.shuffle_buffer_size = shuffle_buffer_size
+        self.decode_threads = decode_threads
+        self.class_names = list(class_names) if class_names is not None else None
+        self.class_fraction = class_fraction
+        self.annotation_csv_url = annotation_csv_url
+        self.annotation_csv_path = annotation_csv_path
+        self.skip_decode_errors = skip_decode_errors
+        self._selected_filenames: set[str] | None = None
+
+    def _decode_hf_clip(self, video_decoder: Any) -> torch.Tensor:
+        total_frames = self.frames * self.frame_step
+        frame_batch = video_decoder.get_frames_in_range(0, total_frames, self.frame_step)
+        clip = frame_batch.data
+        if clip.ndim != 4 or clip.size(0) == 0:
+            raise ValueError("Decoded Hugging Face video clip has no usable frames")
+        clip = clip.float() / 255.0
+        if clip.size(0) < self.frames:
+            indices = torch.linspace(0, clip.size(0) - 1, self.frames).round().long()
+            clip = clip.index_select(0, indices)
+        else:
+            clip = clip[: self.frames]
+        return clip.permute(1, 0, 2, 3).contiguous()
+
+    def _resolve_annotation_source(self) -> str:
+        if self.annotation_csv_path is not None:
+            return self.annotation_csv_path
+        if self.annotation_csv_url is not None:
+            return self.annotation_csv_url
+        if "kinetics-700" in self.repo_id.lower():
+            return DEFAULT_KINETICS700_TRAIN_ANNOTATION_URL
+        raise ValueError(
+            "Filtering Hugging Face videos by Kinetics class requires annotation_csv_path or annotation_csv_url"
+        )
+
+    def _read_annotation_rows(self) -> list[dict[str, str]]:
+        source = self._resolve_annotation_source()
+        if source.startswith(("http://", "https://")):
+            text = urllib.request.urlopen(source, timeout=60).read().decode("utf-8", errors="replace")
+        else:
+            text = Path(source).expanduser().read_text(encoding="utf-8")
+        return list(csv.DictReader(text.splitlines()))
+
+    @staticmethod
+    def _format_kinetics_filename(youtube_id: str, time_start: str, time_end: str) -> str:
+        start = int(float(time_start))
+        end = int(float(time_end))
+        return f"{youtube_id}_{start:06d}_{end:06d}.mp4"
+
+    @staticmethod
+    def _extract_video_filename(video_value: Any) -> str | None:
+        candidates: list[str] = []
+        if isinstance(video_value, dict):
+            candidates.extend(str(video_value.get(key)) for key in ("path", "filename", "src") if video_value.get(key))
+        for attr in ("path", "filename", "src", "source"):
+            value = getattr(video_value, attr, None)
+            if value:
+                candidates.append(str(value))
+        for raw_value in candidates:
+            value = raw_value.split("::", 1)[0]
+            name = Path(value).name
+            if name:
+                return name
+        return None
+
+    def _resolve_selected_filenames(self) -> set[str] | None:
+        if self.class_names is None:
+            return None
+        if self._selected_filenames is not None:
+            return self._selected_filenames
+        if self.class_fraction is None:
+            class_fraction = 1.0
+        else:
+            class_fraction = float(self.class_fraction)
+        if not 0.0 < class_fraction <= 1.0:
+            raise ValueError(f"class_fraction must be in (0, 1], got {class_fraction}")
+
+        rows = self._read_annotation_rows()
+        by_class: dict[str, list[str]] = {name: [] for name in self.class_names}
+        for row in rows:
+            label = row.get("label")
+            if label in by_class:
+                filename = self._format_kinetics_filename(
+                    youtube_id=row["youtube_id"],
+                    time_start=row["time_start"],
+                    time_end=row["time_end"],
+                )
+                by_class[label].append(filename)
+
+        missing = [name for name, filenames in by_class.items() if not filenames]
+        if missing:
+            raise ValueError(f"Could not find Kinetics annotations for classes: {', '.join(missing)}")
+
+        selected: set[str] = set()
+        base_rng = random.Random(self.sample_seed)
+        for class_name in self.class_names:
+            filenames = sorted(by_class[class_name])
+            rng = random.Random(base_rng.randint(0, 10**9))
+            rng.shuffle(filenames)
+            keep = max(1, math.ceil(len(filenames) * class_fraction))
+            selected.update(filenames[:keep])
+        self._selected_filenames = selected
+        return selected
+
+    def __iter__(self):
+        try:
+            from datasets import Video, load_dataset
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "Hugging Face streaming requires the 'datasets' package. "
+                "Install requirements.txt to use data.source='huggingface'."
+            ) from exc
+
+        dataset = load_dataset(
+            self.repo_id,
+            self.config_name,
+            split=self.split,
+            streaming=True,
+        )
+        if self.shuffle_buffer_size > 1:
+            dataset = dataset.shuffle(
+                seed=self.sample_seed,
+                buffer_size=self.shuffle_buffer_size,
+            )
+        raw_dataset = dataset.cast_column(self.video_column, Video(decode=False))
+        video_feature = Video(decode=True)
+
+        selected_filenames = self._resolve_selected_filenames()
+        yielded = 0
+        skipped_decode_errors = 0
+        for raw_example in raw_dataset:
+            if selected_filenames is not None:
+                filename = self._extract_video_filename(raw_example[self.video_column])
+                if filename is None or filename not in selected_filenames:
+                    continue
+
+            try:
+                decoded_video = video_feature.decode_example(raw_example[self.video_column])
+                clip = self._decode_hf_clip(decoded_video)
+            except Exception as exc:
+                if not self.skip_decode_errors:
+                    raise
+                skipped_decode_errors += 1
+                if skipped_decode_errors <= 5 or skipped_decode_errors % 25 == 0:
+                    filename = self._extract_video_filename(raw_example[self.video_column]) or "<unknown>"
+                    print(
+                        f"warning: skipping undecodable video {filename} "
+                        f"from {self.repo_id}: {type(exc).__name__}: {exc}"
+                    )
+                continue
+
+            if self.augmentation is not None:
+                clip = random_resized_crop_video(clip, self.augmentation)
+            else:
+                clip = F.interpolate(
+                    clip.permute(1, 0, 2, 3),
+                    size=(self.image_size, self.image_size),
+                    mode="bilinear",
+                    align_corners=False,
+                ).permute(1, 0, 2, 3).contiguous()
+            if clip.size(0) != self.channels:
+                if clip.size(0) == 1 and self.channels == 3:
+                    clip = clip.expand(3, -1, -1, -1)
+                else:
+                    raise ValueError(
+                        f"Expected {self.channels} channels but decoded {clip.size(0)} "
+                        f"channels from Hugging Face dataset {self.repo_id}"
+                    )
+            yield clip
+            yielded += 1
+            if self.max_samples is not None and yielded >= self.max_samples:
+                break
+
+        if yielded == 0:
+            raise RuntimeError(
+                "No clips were yielded from the Hugging Face dataset. "
+                "Check your class filter, annotation mapping, and video decoding environment."
+            )

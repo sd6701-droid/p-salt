@@ -7,6 +7,9 @@ requires-python = ">=3.10"
 dependencies = [
   "torch>=2.1",
   "PyYAML>=6.0",
+  "datasets>=4.0",
+  "torchcodec>=0.1",
+  "wandb>=0.18",
 ]
 
 [build-system]
@@ -14,4 +17,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["rethinking_jepa*"]
+include = ["app*", "rethinking_jepa*", "src*", "tests*"]
