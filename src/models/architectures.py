@@ -40,6 +40,24 @@ VIT_ARCHITECTURES: dict[str, dict[str, float | int]] = {
         "decoder_heads": 12,
         "mlp_ratio": 4.0,
     },
+    "vit_h": {
+        "embed_dim": 1280,
+        "encoder_depth": 32,
+        "encoder_heads": 16,
+        "decoder_dim": 1024,
+        "decoder_depth": 8,
+        "decoder_heads": 16,
+        "mlp_ratio": 4.0,
+    },
+    "vit_huge": {
+        "embed_dim": 1280,
+        "encoder_depth": 32,
+        "encoder_heads": 16,
+        "decoder_dim": 1024,
+        "decoder_depth": 8,
+        "decoder_heads": 16,
+        "mlp_ratio": 4.0,
+    },
 }
 
 

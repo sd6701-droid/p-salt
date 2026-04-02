@@ -41,11 +41,18 @@ class ReconstructionDecoder(nn.Module):
 
 
 class LatentPredictor(nn.Module):
-    def __init__(self, embed_dim: int, predictor_dim: int, depth: int, num_heads: int) -> None:
+    def __init__(
+        self,
+        embed_dim: int,
+        predictor_dim: int,
+        depth: int,
+        num_heads: int,
+        target_embed_dim: int | None = None,
+    ) -> None:
         super().__init__()
         self.in_proj = nn.Linear(embed_dim, predictor_dim)
         self.pos_proj = nn.Linear(embed_dim, predictor_dim)
-        self.out_proj = nn.Linear(predictor_dim, embed_dim)
+        self.out_proj = nn.Linear(predictor_dim, target_embed_dim or embed_dim)
         self.mask_token = nn.Parameter(torch.zeros(1, 1, predictor_dim))
         self.blocks = nn.ModuleList(
             [TransformerBlock(predictor_dim, num_heads, mlp_ratio=4.0) for _ in range(depth)]

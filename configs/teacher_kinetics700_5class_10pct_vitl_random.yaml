@@ -36,7 +36,7 @@ masking:
   mask_aspect_ratio: [0.75, 1.5]
 
 model:
-  architecture: vit_large
+  architecture: vit_tiny
   in_channels: 3
   tubelet_size: 2
   patch_size: 16
@@ -56,8 +56,8 @@ wandb:
   entity: a-salt
   project: rethinking-jepa
   fallback_to_offline: false
-  name: teacher-vit-large-kinetics700-5class-10pct-random
-  tags: [teacher, kinetics700, vit-large, random-mask]
+  name: teacher-vit-tiny-kinetics700-5class-10pct-random
+  tags: [teacher, kinetics700, vit-tiny, random-mask]
 
 train:
   global_batch_size: 3072

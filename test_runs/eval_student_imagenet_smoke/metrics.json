@@ -1,0 +1,12 @@
+{
+  "num_examples": 2,
+  "latent_mse": 1.399039089679718,
+  "latent_smooth_l1": 0.5576944053173065,
+  "latent_cosine": -0.041516576893627644,
+  "teacher_patch_mse": 0.6020282804965973,
+  "output_dir": "test_runs/eval_student_imagenet_smoke",
+  "teacher_checkpoint": "teacher_vit_small.pt",
+  "student_checkpoint": "student_vit_small.pt",
+  "teacher_architecture": "vit_small",
+  "student_architecture": "vit_small"
+}

@@ -12,7 +12,11 @@ from src.utils.schedulers import CosineScheduler
 
 
 def resolve_device() -> torch.device:
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 def build_loader(cfg: dict) -> DataLoader:
@@ -37,11 +41,36 @@ def build_teacher_from_cfg(cfg: dict, device: torch.device) -> tuple[TeacherMode
 
 
 def build_student_from_cfg(cfg: dict, teacher: TeacherModel, device: torch.device) -> StudentModel:
+    student_backbone_cfg = cfg.get("student_model")
+    if student_backbone_cfg is None:
+        teacher_encoder = teacher.encoder
+        student_kwargs = {
+            "student_in_channels": teacher_encoder.patch_embed.proj.in_channels,
+            "student_embed_dim": teacher_encoder.embed_dim,
+            "student_depth": len(teacher_encoder.blocks),
+            "student_heads": teacher_encoder.blocks[0].attn.num_heads,
+            "student_mlp_ratio": 4.0,
+            "student_tubelet_size": teacher_encoder.tubelet_size,
+            "student_patch_size": teacher_encoder.patch_size,
+        }
+    else:
+        resolved_student_cfg = resolve_model_config(student_backbone_cfg)
+        student_kwargs = {
+            "student_in_channels": resolved_student_cfg["in_channels"],
+            "student_embed_dim": resolved_student_cfg["embed_dim"],
+            "student_depth": resolved_student_cfg["encoder_depth"],
+            "student_heads": resolved_student_cfg["encoder_heads"],
+            "student_mlp_ratio": float(resolved_student_cfg.get("mlp_ratio", 4.0)),
+            "student_tubelet_size": resolved_student_cfg["tubelet_size"],
+            "student_patch_size": resolved_student_cfg["patch_size"],
+        }
+
     student = StudentModel(
         teacher=teacher,
         predictor_dim=cfg["student"]["predictor_dim"],
         predictor_depth=cfg["student"]["predictor_depth"],
         predictor_heads=cfg["student"]["predictor_heads"],
+        **student_kwargs,
     ).to(device)
     return student
 

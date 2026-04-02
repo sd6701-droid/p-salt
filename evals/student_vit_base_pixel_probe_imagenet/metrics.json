@@ -1,0 +1,23 @@
+{
+  "train/checkpoint_path": "checkpoints/student_vit_base_pixel_probe_imagenet.pt",
+  "train/student_checkpoint": "checkpoints/student_vit_base_from_tiny_teacher_kinetics700_5class_10pct_random.pt",
+  "train/final_step": 500,
+  "model/teacher_architecture": "vit_tiny",
+  "model/student_architecture": "vit_base",
+  "probe/batch_size": 16,
+  "probe/decoder_dim": 512,
+  "probe/decoder_depth": 4,
+  "probe/decoder_heads": 8,
+  "probe/train_root": "data/imagenet_probe_related_subset/train",
+  "probe/val_root": "data/imagenet_probe_related_subset/val",
+  "probe/output_dir": "evals/student_vit_base_pixel_probe_imagenet",
+  "probe/train_samples": 7994,
+  "probe/val_samples": 2006,
+  "probe/steps_per_epoch": 500,
+  "probe/epochs": 1,
+  "probe/max_steps": 500,
+  "eval/num_examples": 2006,
+  "eval/masked_patch_mse": 0.028930883995765228,
+  "eval/masked_patch_l1": 0.1226257099468235,
+  "eval/output_dir": "evals/student_vit_base_pixel_probe_imagenet"
+}

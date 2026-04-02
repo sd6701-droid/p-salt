@@ -118,6 +118,13 @@ class StudentModel(nn.Module):
         predictor_dim: int,
         predictor_depth: int,
         predictor_heads: int,
+        student_in_channels: int | None = None,
+        student_embed_dim: int | None = None,
+        student_depth: int | None = None,
+        student_heads: int | None = None,
+        student_mlp_ratio: float = 4.0,
+        student_tubelet_size: int | None = None,
+        student_patch_size: int | None = None,
     ) -> None:
         super().__init__()
         self.teacher = teacher
@@ -125,20 +132,35 @@ class StudentModel(nn.Module):
             param.requires_grad = False
         self.teacher.eval()
         encoder = teacher.encoder
+        student_in_channels = (
+            encoder.patch_embed.proj.in_channels if student_in_channels is None else student_in_channels
+        )
+        student_embed_dim = encoder.embed_dim if student_embed_dim is None else student_embed_dim
+        student_depth = len(encoder.blocks) if student_depth is None else student_depth
+        student_heads = encoder.blocks[0].attn.num_heads if student_heads is None else student_heads
+        student_tubelet_size = encoder.tubelet_size if student_tubelet_size is None else student_tubelet_size
+        student_patch_size = encoder.patch_size if student_patch_size is None else student_patch_size
+
+        if student_tubelet_size != encoder.tubelet_size or student_patch_size != encoder.patch_size:
+            raise ValueError(
+                "Student and teacher must use the same tubelet_size and patch_size so token grids match"
+            )
+
         self.student = VideoTransformerEncoder(
-            in_channels=encoder.patch_embed.proj.in_channels,
-            embed_dim=encoder.embed_dim,
-            depth=len(encoder.blocks),
-            num_heads=encoder.blocks[0].attn.num_heads,
-            mlp_ratio=4.0,
-            tubelet_size=encoder.tubelet_size,
-            patch_size=encoder.patch_size,
+            in_channels=student_in_channels,
+            embed_dim=student_embed_dim,
+            depth=student_depth,
+            num_heads=student_heads,
+            mlp_ratio=student_mlp_ratio,
+            tubelet_size=student_tubelet_size,
+            patch_size=student_patch_size,
         )
         self.predictor = LatentPredictor(
-            embed_dim=encoder.embed_dim,
+            embed_dim=student_embed_dim,
             predictor_dim=predictor_dim,
             depth=predictor_depth,
             num_heads=predictor_heads,
+            target_embed_dim=encoder.embed_dim,
         )
 
     def forward(self, video: torch.Tensor, mask: torch.Tensor) -> ModelOutput:

@@ -8,6 +8,24 @@ def _wandb_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
     return dict(cfg.get("wandb", {}))
 
 
+def _infer_wandb_run_name(cfg: dict[str, Any], job_type: str) -> str | None:
+    app_name = str(cfg.get("app", ""))
+    teacher_arch = cfg.get("model", {}).get("architecture")
+    student_arch = cfg.get("student_model", {}).get("architecture")
+
+    if "student" in app_name or job_type == "student-train":
+        if student_arch and teacher_arch:
+            return f"student-{student_arch}-from-{teacher_arch}-teacher"
+        if student_arch:
+            return f"student-{student_arch}"
+
+    if "train" in app_name or "teacher" in app_name or job_type == "teacher-train":
+        if teacher_arch:
+            return f"teacher-{teacher_arch}"
+
+    return None
+
+
 def wandb_enabled(cfg: dict[str, Any]) -> bool:
     return bool(_wandb_cfg(cfg).get("enabled", False))
 
@@ -27,7 +45,11 @@ def init_wandb_run(cfg: dict[str, Any], *, job_type: str) -> Any | None:
 
     project = os.environ.get("WANDB_PROJECT") or wandb_cfg.get("project") or "rethinking-jepa"
     entity = os.environ.get("WANDB_ENTITY") or wandb_cfg.get("entity")
-    run_name = wandb_cfg.get("name")
+    run_name = (
+        os.environ.get("WANDB_RUN_NAME")
+        or wandb_cfg.get("name")
+        or _infer_wandb_run_name(cfg, job_type)
+    )
     mode = os.environ.get("WANDB_MODE") or wandb_cfg.get("mode") or "online"
     tags = list(wandb_cfg.get("tags", []))
     group = wandb_cfg.get("group")
@@ -68,6 +90,25 @@ def log_wandb_metrics(run: Any | None, metrics: dict[str, Any]) -> None:
     if run is None:
         return
     run.log(metrics)
+
+
+def log_wandb_artifact(
+    run: Any | None,
+    *,
+    name: str,
+    artifact_type: str,
+    paths: list[str],
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if run is None:
+        return
+
+    import wandb
+
+    artifact = wandb.Artifact(name=name, type=artifact_type, metadata=metadata or {})
+    for path in paths:
+        artifact.add_file(path)
+    run.log_artifact(artifact)
 
 
 def finish_wandb_run(run: Any | None, summary: dict[str, Any] | None = None) -> None:

@@ -1,0 +1,10 @@
+{
+  "model/teacher_architecture": "vit_tiny",
+  "model/student_architecture": "vit_base",
+  "eval_probe/probe_checkpoint": "checkpoints/student_vit_base_pixel_probe_imagenet.pt",
+  "eval_probe/student_checkpoint": "checkpoints/student_vit_base_from_tiny_teacher_kinetics700_5class_10pct_random.pt",
+  "eval_probe/num_examples": 20,
+  "eval_probe/avg_masked_patch_mse": 0.028150418144650757,
+  "eval_probe/avg_masked_patch_l1": 0.12133002374321222,
+  "eval_probe/output_dir": "evals/student_vit_base_pixel_probe_imagenet_eval"
+}

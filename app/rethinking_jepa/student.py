@@ -17,7 +17,7 @@ if __package__ in (None, ""):
         resolve_device,
         sample_mask_from_model,
     )
-    from src.utils.config import load_config
+    from src.utils import finish_wandb_run, init_wandb_run, load_config, log_wandb_metrics
 else:
     from app.rethinking_jepa.utils import (
         build_loader,
@@ -27,7 +27,13 @@ else:
         resolve_device,
         sample_mask_from_model,
     )
-    from src.utils.config import load_config
+    from src.utils import finish_wandb_run, init_wandb_run, load_config, log_wandb_metrics
+
+
+def _save_student_checkpoint(student: nn.Module, checkpoint_path: Path, step: int) -> None:
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(student.state_dict(), checkpoint_path)
+    print(f"student checkpoint saved step={step} path={checkpoint_path}")
 
 
 def run(cfg: dict) -> None:
@@ -37,6 +43,7 @@ def run(cfg: dict) -> None:
 
     student = build_student_from_cfg(cfg, teacher, device)
     loader = build_loader(cfg)
+    wandb_run = init_wandb_run(cfg, job_type="student-train")
     optimizer = torch.optim.AdamW(
         student.parameters(),
         lr=cfg["optimizer"]["start_lr"],
@@ -44,6 +51,9 @@ def run(cfg: dict) -> None:
     )
     scheduler = build_scheduler(cfg, optimizer)
     criterion = nn.SmoothL1Loss()
+    step = 0
+    checkpoint_path = Path(cfg["train"]["checkpoint_path"]).expanduser()
+    checkpoint_every_steps = int(cfg["train"].get("checkpoint_every_steps", 50))
 
     student.train()
     for step, video in enumerate(loader, start=1):
@@ -60,12 +70,34 @@ def run(cfg: dict) -> None:
             f"student step={step} loss={loss.item():.6f} "
             f"lr={lr:.7f} wd={wd:.4f}"
         )
+        log_wandb_metrics(
+            wandb_run,
+            {
+                "train/step": step,
+                "train/loss": float(loss.item()),
+                "train/lr": float(lr),
+                "train/weight_decay": float(wd),
+            },
+        )
+        if checkpoint_every_steps > 0 and step % checkpoint_every_steps == 0:
+            _save_student_checkpoint(student, checkpoint_path, step)
         if step >= cfg["train"]["max_steps"]:
             break
 
-    checkpoint_path = Path(cfg["train"]["checkpoint_path"]).expanduser()
-    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(student.state_dict(), checkpoint_path)
+    _save_student_checkpoint(student, checkpoint_path, step)
+    finish_wandb_run(
+        wandb_run,
+        summary={
+            "train/checkpoint_path": str(checkpoint_path),
+            "train/final_step": step,
+            "train/checkpoint_every_steps": checkpoint_every_steps,
+            "train/teacher_checkpoint": str(cfg["train"]["teacher_checkpoint"]),
+            "model/teacher_architecture": str(cfg["model"]["architecture"]),
+            "model/student_architecture": str(
+                cfg.get("student_model", {}).get("architecture", cfg["model"]["architecture"])
+            ),
+        },
+    )
 
 
 def main(cfg: dict | None = None) -> None:

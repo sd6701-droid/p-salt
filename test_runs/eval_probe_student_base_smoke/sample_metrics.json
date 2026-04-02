@@ -1,0 +1,24 @@
+[
+  {
+    "sample_id": "001_gong_00437_00741323",
+    "label": "gong",
+    "path": "data/imagenet_probe_related_subset/val/gong/00437_00741323.png",
+    "masked_patch_mse": 0.05948494002223015,
+    "masked_patch_l1": 0.19741693139076233,
+    "latent_mean_norm": 27.520832061767578,
+    "latent_std_norm": 0.000347603956470266,
+    "latent_max_norm": 27.52146339416504,
+    "latent_min_norm": 27.5200138092041
+  },
+  {
+    "sample_id": "002_microphone_00035_00834126",
+    "label": "microphone",
+    "path": "data/imagenet_probe_related_subset/val/microphone/00035_00834126.png",
+    "masked_patch_mse": 0.04914237558841705,
+    "masked_patch_l1": 0.15200480818748474,
+    "latent_mean_norm": 27.52068519592285,
+    "latent_std_norm": 0.0005120946443639696,
+    "latent_max_norm": 27.521446228027344,
+    "latent_min_norm": 27.519935607910156
+  }
+]

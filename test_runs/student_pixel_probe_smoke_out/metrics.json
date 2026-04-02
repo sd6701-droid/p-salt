@@ -1,0 +1,11 @@
+{
+  "train/checkpoint_path": "test_runs/student_pixel_probe_smoke.pt",
+  "train/student_checkpoint": "student_vit_small.pt",
+  "train/final_step": 1,
+  "model/teacher_architecture": "vit_small",
+  "model/student_architecture": "vit_small",
+  "eval/num_examples": 2,
+  "eval/masked_patch_mse": 0.5360762476921082,
+  "eval/masked_patch_l1": 0.5927353799343109,
+  "eval/output_dir": "test_runs/student_pixel_probe_smoke_out"
+}
