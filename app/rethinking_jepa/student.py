@@ -54,6 +54,7 @@ def run(cfg: dict) -> None:
     step = 0
     checkpoint_path = Path(cfg["train"]["checkpoint_path"]).expanduser()
     checkpoint_every_steps = int(cfg["train"].get("checkpoint_every_steps", 50))
+    init_ckpt = cfg.get("student", {}).get("init_from_dinov2_checkpoint")
 
     student.train()
     for step, video in enumerate(loader, start=1):
@@ -92,6 +93,7 @@ def run(cfg: dict) -> None:
             "train/final_step": step,
             "train/checkpoint_every_steps": checkpoint_every_steps,
             "train/teacher_checkpoint": str(cfg["train"]["teacher_checkpoint"]),
+            "train/student_init_checkpoint": str(init_ckpt) if init_ckpt else "",
             "model/teacher_architecture": str(cfg["model"]["architecture"]),
             "model/student_architecture": str(
                 cfg.get("student_model", {}).get("architecture", cfg["model"]["architecture"])

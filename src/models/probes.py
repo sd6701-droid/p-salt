@@ -65,3 +65,36 @@ class FrozenStudentPixelProbe(nn.Module):
         )
         target = _gather_tokens(patches, masked_ids)
         return ModelOutput(prediction=prediction, target=target, mask=mask)
+
+
+class FrozenStudentLinearProbe(nn.Module):
+    def __init__(
+        self,
+        student_encoder: VideoTransformerEncoder,
+        num_classes: int,
+        *,
+        pool: str = "mean",
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        if pool not in {"mean", "max"}:
+            raise ValueError(f"Unsupported pool='{pool}'. Expected 'mean' or 'max'.")
+        self.encoder = student_encoder
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+        self.encoder.eval()
+        self.pool = pool
+        self.dropout = nn.Dropout(dropout)
+        self.classifier = nn.Linear(self.encoder.embed_dim, num_classes)
+
+    def encode(self, video: torch.Tensor) -> torch.Tensor:
+        with torch.no_grad():
+            latents, _ = self.encoder(video)
+        if self.pool == "mean":
+            return latents.mean(dim=1)
+        return latents.max(dim=1).values
+
+    def forward(self, video: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        pooled = self.encode(video)
+        logits = self.classifier(self.dropout(pooled))
+        return logits, pooled

@@ -1,0 +1,146 @@
+[
+  {
+    "sample_id": "001_00437_00741323",
+    "image_name": "00437_00741323.png",
+    "label": "gong",
+    "prediction": "gong",
+    "confidence": 0.48682093620300293,
+    "correct": true,
+    "path": "data/imagenet_probe_related_subset/val/gong/00437_00741323.png"
+  },
+  {
+    "sample_id": "002_00035_00834126",
+    "image_name": "00035_00834126.png",
+    "label": "microphone",
+    "prediction": "gong",
+    "confidence": 0.47705188393592834,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/microphone/00035_00834126.png"
+  },
+  {
+    "sample_id": "003_00353_01245120",
+    "image_name": "00353_01245120.png",
+    "label": "cliff",
+    "prediction": "gong",
+    "confidence": 0.4018920063972473,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/cliff/00353_01245120.png"
+  },
+  {
+    "sample_id": "004_00466_01094191",
+    "image_name": "00466_01094191.png",
+    "label": "theater_curtain",
+    "prediction": "gong",
+    "confidence": 0.4435396194458008,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/theater_curtain/00466_01094191.png"
+  },
+  {
+    "sample_id": "005_00189_00697264",
+    "image_name": "00189_00697264.png",
+    "label": "dumbbell",
+    "prediction": "gong",
+    "confidence": 0.4083692729473114,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/dumbbell/00189_00697264.png"
+  },
+  {
+    "sample_id": "006_00205_00585871",
+    "image_name": "00205_00585871.png",
+    "label": "bow",
+    "prediction": "gong",
+    "confidence": 0.4540710747241974,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/bow/00205_00585871.png"
+  },
+  {
+    "sample_id": "007_00297_00665485",
+    "image_name": "00297_00665485.png",
+    "label": "crash_helmet",
+    "prediction": "gong",
+    "confidence": 0.462581992149353,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/crash_helmet/00297_00665485.png"
+  },
+  {
+    "sample_id": "008_00329_01094054",
+    "image_name": "00329_01094054.png",
+    "label": "theater_curtain",
+    "prediction": "gong",
+    "confidence": 0.30977538228034973,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/theater_curtain/00329_01094054.png"
+  },
+  {
+    "sample_id": "009_00071_00834162",
+    "image_name": "00071_00834162.png",
+    "label": "microphone",
+    "prediction": "gong",
+    "confidence": 0.49432143568992615,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/microphone/00071_00834162.png"
+  },
+  {
+    "sample_id": "010_00009_00541667",
+    "image_name": "00009_00541667.png",
+    "label": "barbell",
+    "prediction": "gong",
+    "confidence": 0.4672643542289734,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/barbell/00009_00541667.png"
+  },
+  {
+    "sample_id": "011_00277_00634999",
+    "image_name": "00277_00634999.png",
+    "label": "chime",
+    "prediction": "gong",
+    "confidence": 0.4728811979293823,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/chime/00277_00634999.png"
+  },
+  {
+    "sample_id": "012_00213_00741099",
+    "image_name": "00213_00741099.png",
+    "label": "gong",
+    "prediction": "gong",
+    "confidence": 0.38061657547950745,
+    "correct": true,
+    "path": "data/imagenet_probe_related_subset/val/gong/00213_00741099.png"
+  },
+  {
+    "sample_id": "013_00490_01094215",
+    "image_name": "00490_01094215.png",
+    "label": "theater_curtain",
+    "prediction": "gong",
+    "confidence": 0.4304664433002472,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/theater_curtain/00490_01094215.png"
+  },
+  {
+    "sample_id": "014_00575_00695050",
+    "image_name": "00575_00695050.png",
+    "label": "drum",
+    "prediction": "gong",
+    "confidence": 0.4495590031147003,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/drum/00575_00695050.png"
+  },
+  {
+    "sample_id": "015_00494_01242661",
+    "image_name": "00494_01242661.png",
+    "label": "alp",
+    "prediction": "gong",
+    "confidence": 0.4741863012313843,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/alp/00494_01242661.png"
+  },
+  {
+    "sample_id": "016_00501_01053294",
+    "image_name": "00501_01053294.png",
+    "label": "steel_drum",
+    "prediction": "gong",
+    "confidence": 0.365891695022583,
+    "correct": false,
+    "path": "data/imagenet_probe_related_subset/val/steel_drum/00501_01053294.png"
+  }
+]

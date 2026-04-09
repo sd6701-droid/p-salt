@@ -23,12 +23,14 @@ class ImageFolderRepeatedFrameDataset(Dataset[dict[str, object]]):
     ) -> None:
         dataset = ImageFolder(str(Path(root).expanduser()))
         samples = list(dataset.samples)
+        selected_class_names: list[str] | None = None
 
         if class_names:
             allowed = set(class_names)
             samples = [sample for sample in samples if dataset.classes[sample[1]] in allowed]
             if not samples:
                 raise ValueError(f"No images found for class_names={class_names} under {root}")
+            selected_class_names = [name for name in class_names if name in dataset.class_to_idx]
 
         if max_samples is not None and len(samples) > max_samples:
             rng = random.Random(sample_seed)
@@ -37,7 +39,18 @@ class ImageFolderRepeatedFrameDataset(Dataset[dict[str, object]]):
 
         self.root = Path(root).expanduser()
         self.samples = samples
-        self.classes = dataset.classes
+        if selected_class_names is not None:
+            self.classes = selected_class_names
+            self.class_to_idx = {name: idx for idx, name in enumerate(self.classes)}
+            self._label_remap = {
+                dataset.class_to_idx[name]: self.class_to_idx[name] for name in self.classes
+            }
+        else:
+            kept_label_ids = sorted({label for _, label in samples})
+            self.classes = [dataset.classes[label] for label in kept_label_ids]
+            self.class_to_idx = {name: idx for idx, name in enumerate(self.classes)}
+            self._label_remap = {label: idx for idx, label in enumerate(kept_label_ids)}
+        self._all_classes = dataset.classes
         self.input_size = input_size
         self.frames = frames
         self.resize_size = resize_size or input_size
@@ -56,6 +69,7 @@ class ImageFolderRepeatedFrameDataset(Dataset[dict[str, object]]):
         return {
             "video": video,
             "image": image_tensor,
-            "label": self.classes[label],
+            "label": self._all_classes[label],
+            "label_index": self._label_remap[label],
             "path": str(path),
         }

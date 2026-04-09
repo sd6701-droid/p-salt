@@ -1,0 +1,13 @@
+{
+  "model/teacher_architecture": "vit_tiny",
+  "model/student_architecture": "vit_base",
+  "linear_probe/student_checkpoint": "checkpoints/student_vit_base_from_tiny_teacher_kinetics700_5class_10pct_random.pt",
+  "linear_probe/checkpoint_path": "checkpoints/student_vit_base_linear_probe_imagenet.pt",
+  "linear_probe/output_dir": "evals/student_vit_base_linear_probe_imagenet",
+  "linear_probe/final_step": 2,
+  "linear_probe/num_classes": 17,
+  "linear_probe/num_examples": 16,
+  "linear_probe/val_loss": 2.8899075388908386,
+  "linear_probe/val_accuracy_top1": 0.0625,
+  "linear_probe/val_accuracy_top5": 0.375
+}

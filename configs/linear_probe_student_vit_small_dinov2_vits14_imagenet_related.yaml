@@ -1,0 +1,61 @@
+app: rethinking_jepa.linear_probe_student_imagenet
+
+data:
+  class_names: []
+  frames: 16
+  input_size: 224
+  resize_size: 256
+
+model:
+  architecture: vit_tiny
+  in_channels: 3
+  tubelet_size: 2
+  patch_size: 16
+
+student_model:
+  architecture: vit_small
+  in_channels: 3
+  tubelet_size: 2
+  patch_size: 16
+
+student:
+  predictor_dim: 768
+  predictor_depth: 4
+  predictor_heads: 12
+
+linear_probe:
+  train_root: data/imagenet_probe_related_subset/train
+  val_root: data/imagenet_probe_related_subset/val
+  batch_size: 16
+  num_workers: 0
+  max_train_samples: null
+  max_val_samples: null
+  sample_seed: 0
+  epochs: 1
+  max_steps: null
+  checkpoint_every_steps: 250
+  eval_every_steps: 250
+  num_prediction_rows: 20
+  pool: mean
+  dropout: 0.0
+  student_checkpoint: checkpoints/student_vit_small_from_tiny_teacher_dinov2_vits14_kinetics700_5class_10pct_random.pt
+  checkpoint_path: checkpoints/student_vit_small_linear_probe_imagenet.pt
+  output_dir: evals/student_vit_small_linear_probe_imagenet
+
+optimizer:
+  start_lr: 0.0002
+  lr: 0.000625
+  final_lr: 0.000001
+  start_weight_decay: 0.04
+  end_weight_decay: 0.4
+  clip_grad: 0.02
+  warmup_steps: 100
+  betas: [0.9, 0.95]
+
+wandb:
+  enabled: true
+  entity: a-salt
+  project: rethinking-jepa
+  fallback_to_offline: false
+  name: linear-probe-student-vit-small-dinov2-vits14-imagenet-related
+  tags: [linear-probe, imagenet, student-vit-small, dinov2-vits14]

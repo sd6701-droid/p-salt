@@ -1,0 +1,17 @@
+sample_id,image_name,label,prediction,confidence,correct,path
+001_00437_00741323,00437_00741323.png,gong,drum,0.11424002051353455,False,data/imagenet_probe_related_subset/val/gong/00437_00741323.png
+002_00035_00834126,00035_00834126.png,microphone,drum,0.11382169276475906,False,data/imagenet_probe_related_subset/val/microphone/00035_00834126.png
+003_00353_01245120,00353_01245120.png,cliff,microphone,0.10831724107265472,False,data/imagenet_probe_related_subset/val/cliff/00353_01245120.png
+004_00466_01094191,00466_01094191.png,theater_curtain,drum,0.11073987185955048,False,data/imagenet_probe_related_subset/val/theater_curtain/00466_01094191.png
+005_00189_00697264,00189_00697264.png,dumbbell,microphone,0.10842857509851456,False,data/imagenet_probe_related_subset/val/dumbbell/00189_00697264.png
+006_00205_00585871,00205_00585871.png,bow,drum,0.11130595207214355,False,data/imagenet_probe_related_subset/val/bow/00205_00585871.png
+007_00297_00665485,00297_00665485.png,crash_helmet,drum,0.11159364879131317,False,data/imagenet_probe_related_subset/val/crash_helmet/00297_00665485.png
+008_00329_01094054,00329_01094054.png,theater_curtain,microphone,0.10791211575269699,False,data/imagenet_probe_related_subset/val/theater_curtain/00329_01094054.png
+009_00071_00834162,00071_00834162.png,microphone,drum,0.11525502055883408,False,data/imagenet_probe_related_subset/val/microphone/00071_00834162.png
+010_00009_00541667,00009_00541667.png,barbell,drum,0.11309389024972916,False,data/imagenet_probe_related_subset/val/barbell/00009_00541667.png
+011_00277_00634999,00277_00634999.png,chime,drum,0.11313720792531967,False,data/imagenet_probe_related_subset/val/chime/00277_00634999.png
+012_00213_00741099,00213_00741099.png,gong,microphone,0.1077345684170723,False,data/imagenet_probe_related_subset/val/gong/00213_00741099.png
+013_00490_01094215,00490_01094215.png,theater_curtain,drum,0.10990605503320694,False,data/imagenet_probe_related_subset/val/theater_curtain/00490_01094215.png
+014_00575_00695050,00575_00695050.png,drum,drum,0.11055146157741547,True,data/imagenet_probe_related_subset/val/drum/00575_00695050.png
+015_00494_01242661,00494_01242661.png,alp,drum,0.11320598423480988,False,data/imagenet_probe_related_subset/val/alp/00494_01242661.png
+016_00501_01053294,00501_01053294.png,steel_drum,microphone,0.10828769952058792,False,data/imagenet_probe_related_subset/val/steel_drum/00501_01053294.png

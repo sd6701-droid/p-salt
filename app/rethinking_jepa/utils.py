@@ -7,6 +7,7 @@ from src.datasets.data_manager import build_video_dataset
 from src.masks.default import sample_token_mask
 from src.masks.multiblock3d import sample_multi_block_mask
 from src.models.architectures import resolve_model_config
+from src.models.dinov2_init import initialize_video_encoder_from_dinov2
 from src.models.jepa import StudentModel, TeacherModel
 from src.utils.schedulers import CosineScheduler
 
@@ -72,6 +73,15 @@ def build_student_from_cfg(cfg: dict, teacher: TeacherModel, device: torch.devic
         predictor_heads=cfg["student"]["predictor_heads"],
         **student_kwargs,
     ).to(device)
+
+    init_ckpt = cfg.get("student", {}).get("init_from_dinov2_checkpoint")
+    if init_ckpt:
+        info = initialize_video_encoder_from_dinov2(student.student, init_ckpt)
+        print(
+            "initialized student encoder from DINOv2 checkpoint "
+            f"path={info['checkpoint_path']} loaded_tensors={info['loaded_tensors']} "
+            f"source_depth={info['source_depth']} student_depth={info['student_depth']}"
+        )
     return student
 
 
