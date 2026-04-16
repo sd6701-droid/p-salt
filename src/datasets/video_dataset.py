@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import math
 import random
+import subprocess
+import tempfile
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +15,8 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, IterableDataset
 
 DEFAULT_KINETICS700_TRAIN_ANNOTATION_URL = "https://s3.amazonaws.com/kinetics/700_2020/annotations/train.csv"
+VIDEO_FILE_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm")
+SQUASHFS_FILE_EXTENSIONS = (".sqf", ".sqfs", ".squashfs")
 
 
 @dataclass
@@ -153,6 +157,163 @@ class VideoFileDataset(Dataset[torch.Tensor]):
             else:
                 raise ValueError(
                     f"Expected {self.channels} channels but decoded {clip.size(0)} from {path}"
+                )
+        return clip
+
+
+class SquashFSVideoDataset(Dataset[torch.Tensor]):
+    def __init__(
+        self,
+        archive_path: str | Path,
+        channels: int,
+        frames: int,
+        frame_step: int,
+        image_size: int,
+        augmentation: VideoAugmentationConfig | None = None,
+        max_samples: int | None = None,
+        sample_seed: int = 0,
+    ) -> None:
+        archive = Path(archive_path).expanduser()
+        if archive.suffix.lower() not in SQUASHFS_FILE_EXTENSIONS:
+            raise ValueError(
+                f"Expected a SquashFS archive with one of {SQUASHFS_FILE_EXTENSIONS}, got '{archive}'"
+            )
+        if not archive.is_file():
+            raise FileNotFoundError(f"SquashFS archive not found at '{archive}'")
+
+        self.archive_path = archive
+        self.channels = channels
+        self.frames = frames
+        self.frame_step = frame_step
+        self.image_size = image_size
+        self.augmentation = augmentation
+
+        self.archive_entries = self._list_video_entries()
+        if not self.archive_entries:
+            raise ValueError(
+                f"No video files with extensions {VIDEO_FILE_EXTENSIONS} were found inside '{archive}'"
+            )
+
+        if max_samples is not None and len(self.archive_entries) > max_samples:
+            rng = random.Random(sample_seed)
+            archive_entries = list(self.archive_entries)
+            rng.shuffle(archive_entries)
+            self.archive_entries = archive_entries[: int(max_samples)]
+
+    def _list_video_entries(self) -> list[str]:
+        try:
+            result = subprocess.run(
+                ["unsquashfs", "-no-progress", "-d", "", "-lc", str(self.archive_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "Listing videos inside a SquashFS archive requires the 'unsquashfs' command "
+                "from squashfs-tools to be available on PATH."
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.strip()
+            raise RuntimeError(
+                f"Failed to list SquashFS archive '{self.archive_path}': {stderr or exc}"
+            ) from exc
+
+        entries: list[str] = []
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            normalized = line.removeprefix("squashfs-root/").lstrip("/")
+            if Path(normalized).suffix.lower() not in VIDEO_FILE_EXTENSIONS:
+                continue
+            entries.append(normalized)
+        return sorted(set(entries))
+
+    def __len__(self) -> int:
+        return len(self.archive_entries)
+
+    def _sample_clip(self, video: torch.Tensor) -> torch.Tensor:
+        video = video.float() / 255.0
+        total_frames = self.frames * self.frame_step
+        if video.size(0) >= total_frames:
+            max_start = video.size(0) - total_frames
+            start = 0 if max_start == 0 else random.randint(0, max_start)
+            video = video[start : start + total_frames : self.frame_step]
+        else:
+            if video.size(0) == 0:
+                raise ValueError("Encountered a video with zero frames")
+            indices = torch.linspace(0, video.size(0) - 1, self.frames).round().long()
+            video = video.index_select(0, indices)
+        return video.permute(3, 0, 1, 2).contiguous()
+
+    def _extract_archive_entry(self, entry: str) -> Path:
+        suffix = Path(entry).suffix or ".mp4"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+            temp_path = Path(handle.name)
+            try:
+                try:
+                    result = subprocess.run(
+                        ["sqfscat", str(self.archive_path), entry],
+                        check=True,
+                        stdout=handle,
+                        stderr=subprocess.PIPE,
+                    )
+                except FileNotFoundError:
+                    result = subprocess.run(
+                        ["unsquashfs", "-cat", str(self.archive_path), entry],
+                        check=True,
+                        stdout=handle,
+                        stderr=subprocess.PIPE,
+                    )
+            except FileNotFoundError as exc:
+                temp_path.unlink(missing_ok=True)
+                raise RuntimeError(
+                    "Reading videos from a SquashFS archive requires either 'sqfscat' or "
+                    "'unsquashfs' from squashfs-tools to be available on PATH."
+                ) from exc
+            except subprocess.CalledProcessError as exc:
+                temp_path.unlink(missing_ok=True)
+                stderr = exc.stderr.decode("utf-8", errors="replace").strip()
+                raise RuntimeError(
+                    f"Failed to extract '{entry}' from SquashFS archive '{self.archive_path}': "
+                    f"{stderr or exc}"
+                ) from exc
+        return temp_path
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        try:
+            from torchvision.io import read_video
+        except ImportError as exc:
+            raise ImportError(
+                "Local video loading requires torchvision video I/O support. "
+                "Your current torchvision build does not expose torchvision.io.read_video. "
+                "Install a torchvision build with video support for local file decoding."
+            ) from exc
+
+        archive_entry = self.archive_entries[index]
+        temp_path = self._extract_archive_entry(archive_entry)
+        try:
+            video, _, _ = read_video(str(temp_path), pts_unit="sec")
+        finally:
+            temp_path.unlink(missing_ok=True)
+        clip = self._sample_clip(video)
+        if self.augmentation is not None:
+            clip = random_resized_crop_video(clip, self.augmentation)
+        else:
+            clip = F.interpolate(
+                clip.permute(1, 0, 2, 3),
+                size=(self.image_size, self.image_size),
+                mode="bilinear",
+                align_corners=False,
+            ).permute(1, 0, 2, 3).contiguous()
+        if clip.size(0) != self.channels:
+            if clip.size(0) == 1 and self.channels == 3:
+                clip = clip.expand(3, -1, -1, -1)
+            else:
+                raise ValueError(
+                    f"Expected {self.channels} channels but decoded {clip.size(0)} from "
+                    f"archive entry '{archive_entry}'"
                 )
         return clip
 

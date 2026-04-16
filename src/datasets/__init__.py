@@ -6,7 +6,10 @@ from .imagenet_related_classes import (
 )
 from .video_dataset import (
     HuggingFaceVideoDataset,
+    SQUASHFS_FILE_EXTENSIONS,
+    SquashFSVideoDataset,
     SyntheticVideoDataset,
+    VIDEO_FILE_EXTENSIONS,
     VideoAugmentationConfig,
     VideoFileDataset,
     random_resized_crop_video,
@@ -16,7 +19,10 @@ __all__ = [
     "HuggingFaceVideoDataset",
     "ImageFolderRepeatedFrameDataset",
     "KINETICS_TO_IMAGENET_RELATED_LABELS",
+    "SQUASHFS_FILE_EXTENSIONS",
+    "SquashFSVideoDataset",
     "SyntheticVideoDataset",
+    "VIDEO_FILE_EXTENSIONS",
     "VideoAugmentationConfig",
     "VideoFileDataset",
     "build_video_dataset",

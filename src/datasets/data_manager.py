@@ -10,6 +10,8 @@ from torch.utils.data import ConcatDataset, Dataset
 
 from .video_dataset import (
     HuggingFaceVideoDataset,
+    SQUASHFS_FILE_EXTENSIONS,
+    SquashFSVideoDataset,
     SyntheticVideoDataset,
     VideoAugmentationConfig,
     VideoFileDataset,
@@ -91,10 +93,28 @@ def build_video_dataset(cfg: dict[str, Any]) -> Dataset[torch.Tensor]:
         )
 
     if source == "real":
+        root = data_cfg.get("root")
+        if root and Path(root).expanduser().suffix.lower() in SQUASHFS_FILE_EXTENSIONS:
+            return SquashFSVideoDataset(
+                archive_path=root,
+                image_size=data_cfg["image_size"],
+                max_samples=data_cfg.get("max_samples"),
+                sample_seed=int(data_cfg.get("sample_seed", 0)),
+                **common_kwargs,
+            )
         video_paths = _collect_video_paths(data_cfg)
         return VideoFileDataset(
             video_paths=video_paths,
             image_size=data_cfg["image_size"],
+            **common_kwargs,
+        )
+
+    if source == "squashfs":
+        return SquashFSVideoDataset(
+            archive_path=data_cfg["archive_path"],
+            image_size=data_cfg["image_size"],
+            max_samples=data_cfg.get("max_samples"),
+            sample_seed=int(data_cfg.get("sample_seed", 0)),
             **common_kwargs,
         )
 
@@ -135,5 +155,5 @@ def build_video_dataset(cfg: dict[str, Any]) -> Dataset[torch.Tensor]:
         return ConcatDataset(datasets)
 
     raise ValueError(
-        f"Unknown data.source '{source}'. Expected synthetic, real, huggingface, or mixture"
+        f"Unknown data.source '{source}'. Expected synthetic, real, squashfs, huggingface, or mixture"
     )
