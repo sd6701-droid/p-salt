@@ -172,6 +172,9 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
         augmentation: VideoAugmentationConfig | None = None,
         max_samples: int | None = None,
         sample_seed: int = 0,
+        class_names: list[str] | None = None,
+        class_fraction: float | None = None,
+        max_samples_per_class: int | None = None,
     ) -> None:
         archive = Path(archive_path).expanduser()
         if archive.suffix.lower() not in SQUASHFS_FILE_EXTENSIONS:
@@ -187,12 +190,24 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
         self.frame_step = frame_step
         self.image_size = image_size
         self.augmentation = augmentation
+        self.class_names = list(class_names) if class_names is not None else None
+        self.class_fraction = class_fraction
+        self.max_samples_per_class = (
+            int(max_samples_per_class) if max_samples_per_class is not None else None
+        )
 
         self.archive_entries = self._list_video_entries()
         if not self.archive_entries:
             raise ValueError(
                 f"No video files with extensions {VIDEO_FILE_EXTENSIONS} were found inside '{archive}'"
             )
+
+        if self.class_names is not None:
+            self.archive_entries = self._filter_entries_by_class(self.archive_entries, sample_seed)
+            if not self.archive_entries:
+                raise ValueError(
+                    f"No videos found for class_names={self.class_names} inside '{archive}'"
+                )
 
         if max_samples is not None and len(self.archive_entries) > max_samples:
             rng = random.Random(sample_seed)
@@ -229,6 +244,51 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
                 continue
             entries.append(normalized)
         return sorted(set(entries))
+
+    @staticmethod
+    def _class_name_from_entry(entry: str) -> str:
+        parent = Path(entry).parent.name
+        if not parent:
+            raise ValueError(f"Could not infer class name from SquashFS entry '{entry}'")
+        return parent
+
+    def _filter_entries_by_class(self, entries: list[str], sample_seed: int) -> list[str]:
+        requested_classes = list(dict.fromkeys(self.class_names or []))
+        allowed = set(requested_classes)
+        by_class: dict[str, list[str]] = {class_name: [] for class_name in requested_classes}
+
+        for entry in entries:
+            class_name = self._class_name_from_entry(entry)
+            if class_name in allowed:
+                by_class[class_name].append(entry)
+
+        missing = [class_name for class_name, class_entries in by_class.items() if not class_entries]
+        if missing:
+            raise ValueError(
+                "The following classes were not found inside the SquashFS archive: "
+                + ", ".join(missing)
+            )
+
+        base_rng = random.Random(sample_seed)
+        selected: list[str] = []
+        for class_name in requested_classes:
+            class_entries = sorted(by_class[class_name])
+            rng = random.Random(base_rng.randint(0, 10**9))
+            rng.shuffle(class_entries)
+
+            if self.class_fraction is not None:
+                fraction = float(self.class_fraction)
+                if not 0.0 < fraction <= 1.0:
+                    raise ValueError(f"class_fraction must be in (0, 1], got {fraction}")
+                keep = max(1, math.ceil(len(class_entries) * fraction))
+                class_entries = class_entries[:keep]
+
+            if self.max_samples_per_class is not None:
+                class_entries = class_entries[: self.max_samples_per_class]
+
+            selected.extend(class_entries)
+
+        return selected
 
     def __len__(self) -> int:
         return len(self.archive_entries)

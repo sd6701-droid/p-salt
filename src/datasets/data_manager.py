@@ -100,6 +100,9 @@ def build_video_dataset(cfg: dict[str, Any]) -> Dataset[torch.Tensor]:
                 image_size=data_cfg["image_size"],
                 max_samples=data_cfg.get("max_samples"),
                 sample_seed=int(data_cfg.get("sample_seed", 0)),
+                class_names=data_cfg.get("class_names"),
+                class_fraction=data_cfg.get("class_fraction"),
+                max_samples_per_class=data_cfg.get("max_samples_per_class"),
                 **common_kwargs,
             )
         video_paths = _collect_video_paths(data_cfg)
@@ -115,6 +118,9 @@ def build_video_dataset(cfg: dict[str, Any]) -> Dataset[torch.Tensor]:
             image_size=data_cfg["image_size"],
             max_samples=data_cfg.get("max_samples"),
             sample_seed=int(data_cfg.get("sample_seed", 0)),
+            class_names=data_cfg.get("class_names"),
+            class_fraction=data_cfg.get("class_fraction"),
+            max_samples_per_class=data_cfg.get("max_samples_per_class"),
             **common_kwargs,
         )
 
