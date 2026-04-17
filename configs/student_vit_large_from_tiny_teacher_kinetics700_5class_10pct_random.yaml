@@ -77,5 +77,5 @@ train:
   steps_per_epoch_scale: 1
   checkpoint_every_steps: 50
   max_steps: 4000
-  teacher_checkpoint: checkpoints/teacher_vit_large_kinetics700_5class_10pct_random.pt
-  checkpoint_path: checkpoints/student_vit_large_from_tiny_teacher_kinetics700_5class_10pct_random.pt
+  teacher_checkpoint: results/checkpoints/teacher_vit_large_kinetics700_5class_10pct_random.pt
+  checkpoint_path: results/checkpoints/student_vit_large_from_tiny_teacher_kinetics700_5class_10pct_random.pt

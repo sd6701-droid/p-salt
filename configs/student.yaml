@@ -44,5 +44,5 @@ train:
   steps_per_epoch_scale: 1
   checkpoint_every_steps: 50
   max_steps: 5
-  teacher_checkpoint: teacher_vit_small.pt
-  checkpoint_path: student_vit_small.pt
+  teacher_checkpoint: results/checkpoints/teacher_vit_small.pt
+  checkpoint_path: results/checkpoints/student_vit_small.pt

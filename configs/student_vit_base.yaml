@@ -43,5 +43,5 @@ train:
   device_batch_size: 1
   steps_per_epoch_scale: 1
   max_steps: 5
-  teacher_checkpoint: teacher_vit_base.pt
-  checkpoint_path: student_vit_base.pt
+  teacher_checkpoint: results/checkpoints/teacher_vit_base.pt
+  checkpoint_path: results/checkpoints/student_vit_base.pt

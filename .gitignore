@@ -6,5 +6,6 @@ vjepa2/
 wandb/
 data/
 checkpoints/
+results/
 tests/
 test_runs/

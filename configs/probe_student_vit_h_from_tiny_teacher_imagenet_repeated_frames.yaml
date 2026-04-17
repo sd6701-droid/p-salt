@@ -47,9 +47,9 @@ probe:
   decoder_dim: 1024
   decoder_depth: 4
   decoder_heads: 16
-  student_checkpoint: checkpoints/student_vit_h_from_tiny_teacher_kinetics700_5class_10pct_random.pt
-  checkpoint_path: checkpoints/student_vit_h_pixel_probe_imagenet.pt
-  output_dir: evals/student_vit_h_pixel_probe_imagenet
+  student_checkpoint: results/checkpoints/student_vit_h_from_tiny_teacher_kinetics700_5class_10pct_random.pt
+  checkpoint_path: results/checkpoints/student_vit_h_pixel_probe_imagenet.pt
+  output_dir: results/evals/student_vit_h_pixel_probe_imagenet
 
 optimizer:
   start_lr: 0.0002

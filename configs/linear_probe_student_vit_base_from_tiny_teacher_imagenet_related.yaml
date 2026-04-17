@@ -38,9 +38,9 @@ linear_probe:
   num_prediction_rows: 20
   pool: mean
   dropout: 0.0
-  student_checkpoint: checkpoints/student_vit_base_from_tiny_teacher_kinetics700_5class_10pct_random.pt
-  checkpoint_path: checkpoints/student_vit_base_linear_probe_imagenet.pt
-  output_dir: evals/student_vit_base_linear_probe_imagenet
+  student_checkpoint: results/checkpoints/student_vit_base_from_tiny_teacher_kinetics700_5class_10pct_random.pt
+  checkpoint_path: results/checkpoints/student_vit_base_linear_probe_imagenet.pt
+  output_dir: results/evals/student_vit_base_linear_probe_imagenet
 
 optimizer:
   start_lr: 0.0002

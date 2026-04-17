@@ -65,4 +65,4 @@ train:
   num_workers: 0
   steps_per_epoch_scale: 1
   max_steps: 4000
-  checkpoint_path: checkpoints/teacher_vit_large_kinetics700_5class_10pct_random.pt
+  checkpoint_path: results/checkpoints/teacher_vit_large_kinetics700_5class_10pct_random.pt
