@@ -36,6 +36,13 @@ optimizer:
   warmup_steps: 10000
   betas: [0.9, 0.95]
 
+wandb:
+  enabled: true
+  project: rethinking-jepa
+  fallback_to_offline: true
+  name: teacher-vit-small-kinetics400-local-sqf
+  tags: [teacher, kinetics400, local, squashfs, vit-small]
+
 train:
   global_batch_size: 3072
   device_batch_size: 2
