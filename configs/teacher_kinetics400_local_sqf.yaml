@@ -3,14 +3,8 @@ app: rethinking_jepa.train
 data:
   source: squashfs
   archive_path: /projects/work/public/ml-datasets/kinetics/kinetics-400-res256.sqf
+  max_samples: 1000
   sample_seed: 0
-  class_names:
-    - abseiling
-    - air_drumming
-    - applauding
-    - archery
-    - arm_wrestling
-  max_samples_per_class: 100
   frames: 16
   frame_step: 4
   image_size: 256
@@ -33,8 +27,8 @@ model:
   patch_size: 16
 
 optimizer:
-  start_lr: 0.0002
-  lr: 0.000625
+  start_lr: 0.0002  #update
+  lr: 0.000625  # update
   final_lr: 0.000001
   start_weight_decay: 0.04
   end_weight_decay: 0.4
@@ -46,8 +40,8 @@ wandb:
   enabled: true
   project: rethinking-jepa
   fallback_to_offline: true
-  name: teacher-vit-small-kinetics400-local-sqf-5class-100-per-class
-  tags: [teacher, kinetics400, local, squashfs, vit-small, five-class, human-activities]
+  name: teacher-vit-small-kinetics400-local-sqf
+  tags: [teacher, kinetics400, local, squashfs, vit-small]
 
 train:
   global_batch_size: 3072
