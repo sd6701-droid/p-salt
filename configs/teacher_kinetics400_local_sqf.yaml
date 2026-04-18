@@ -39,7 +39,9 @@ optimizer:
 wandb:
   enabled: true
   project: rethinking-jepa
-  fallback_to_offline: true
+  mode: online
+  init_timeout: 180
+  fallback_to_offline: false
   name: teacher-vit-small-kinetics400-local-sqf
   tags: [teacher, kinetics400, local, squashfs, vit-small]
 

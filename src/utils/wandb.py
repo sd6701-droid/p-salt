@@ -30,6 +30,22 @@ def wandb_enabled(cfg: dict[str, Any]) -> bool:
     return bool(_wandb_cfg(cfg).get("enabled", False))
 
 
+def _wandb_settings(wandb_module: Any, wandb_cfg: dict[str, Any]) -> Any | None:
+    init_timeout = os.environ.get("WANDB_INIT_TIMEOUT") or wandb_cfg.get("init_timeout")
+    if init_timeout in (None, ""):
+        return None
+
+    try:
+        timeout_seconds = float(init_timeout)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "W&B init_timeout must be numeric when provided via config or "
+            "WANDB_INIT_TIMEOUT."
+        ) from exc
+
+    return wandb_module.Settings(init_timeout=timeout_seconds)
+
+
 def init_wandb_run(cfg: dict[str, Any], *, job_type: str) -> Any | None:
     wandb_cfg = _wandb_cfg(cfg)
     if not bool(wandb_cfg.get("enabled", False)):
@@ -67,6 +83,9 @@ def init_wandb_run(cfg: dict[str, Any], *, job_type: str) -> Any | None:
         "config": cfg,
         "job_type": job_type,
     }
+    settings = _wandb_settings(wandb, wandb_cfg)
+    if settings is not None:
+        init_kwargs["settings"] = settings
 
     try:
         run = wandb.init(**init_kwargs)
