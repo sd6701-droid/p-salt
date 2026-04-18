@@ -367,7 +367,16 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
 
         try:
             subprocess.run(
-                [unsquashfs, "-f", "-no-progress", "-d", str(output_dir), str(self.archive_path), entry],
+                [
+                    unsquashfs,
+                    "-f",
+                    "-no-progress",
+                    "-no-xattrs",
+                    "-d",
+                    str(output_dir),
+                    str(self.archive_path),
+                    entry,
+                ],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
