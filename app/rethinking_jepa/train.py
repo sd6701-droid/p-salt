@@ -13,6 +13,7 @@ if __package__ in (None, ""):
     from app.rethinking_jepa.utils import (
         build_loader,
         resolve_batch_settings,
+        resolve_training_horizon,
         build_scheduler,
         build_teacher_from_cfg,
         resolve_device,
@@ -31,6 +32,7 @@ else:
     from app.rethinking_jepa.utils import (
         build_loader,
         resolve_batch_settings,
+        resolve_training_horizon,
         build_scheduler,
         build_teacher_from_cfg,
         resolve_device,
@@ -60,6 +62,7 @@ def run(cfg: dict) -> None:
     model, _ = build_teacher_from_cfg(cfg, device)
     loader = build_loader(cfg)
     device_batch_size, effective_batch_size, accumulation_steps = resolve_batch_settings(cfg)
+    max_optimizer_steps, max_micro_steps = resolve_training_horizon(cfg, accumulation_steps)
     best_checkpoint_path, last_checkpoint_path = checkpoint_paths(cfg)
     wandb_run = init_wandb_run(cfg, job_type="teacher-train")
     optimizer = torch.optim.AdamW(
@@ -67,7 +70,7 @@ def run(cfg: dict) -> None:
         lr=cfg["optimizer"]["start_lr"],
         betas=tuple(cfg["optimizer"]["betas"]),
     )
-    scheduler = build_scheduler(cfg, optimizer)
+    scheduler = build_scheduler(cfg, optimizer, total_steps=max_optimizer_steps)
     criterion = nn.MSELoss()
     step = 0
 
@@ -77,21 +80,32 @@ def run(cfg: dict) -> None:
     running_loss = 0.0
     running_micro_batches = 0
     best_loss = float("inf")
+    current_window_size = accumulation_steps
 
-    while step < cfg["train"]["max_steps"]:
+    while step < max_optimizer_steps:
         saw_batch = False
         for video in loader:
             saw_batch = True
+            if running_micro_batches == 0:
+                remaining_micro_steps = None
+                if max_micro_steps is not None:
+                    remaining_micro_steps = max_micro_steps - micro_step
+                    if remaining_micro_steps <= 0:
+                        break
+                current_window_size = accumulation_steps
+                if remaining_micro_steps is not None:
+                    current_window_size = min(accumulation_steps, remaining_micro_steps)
+
             micro_step += 1
             video = video.to(device)
             mask = sample_mask_from_model(model.encoder.patch_embed, video, cfg, device)
             out = model(video, mask)
             loss = criterion(out.prediction, out.target)
-            (loss / accumulation_steps).backward()
+            (loss / current_window_size).backward()
             running_loss += float(loss.item())
             running_micro_batches += 1
 
-            if micro_step % accumulation_steps != 0:
+            if running_micro_batches < current_window_size:
                 continue
 
             step += 1
@@ -113,6 +127,7 @@ def run(cfg: dict) -> None:
                 {
                     "train/step": step,
                     "train/micro_step": micro_step,
+                    "train/max_micro_steps": max_micro_steps if max_micro_steps is not None else 0,
                     "train/loss": mean_loss,
                     "train/lr": float(lr),
                     "train/weight_decay": float(wd),
@@ -123,16 +138,23 @@ def run(cfg: dict) -> None:
             )
             running_loss = 0.0
             running_micro_batches = 0
-            if step >= cfg["train"]["max_steps"]:
+            if step >= max_optimizer_steps or (
+                max_micro_steps is not None and micro_step >= max_micro_steps
+            ):
                 break
 
         if not saw_batch:
             raise RuntimeError("Training loader yielded no batches.")
+        if max_micro_steps is not None and micro_step >= max_micro_steps:
+            break
 
     finish_wandb_run(
         wandb_run,
         summary={
             "train/final_step": step,
+            "train/final_micro_step": micro_step,
+            "train/max_optimizer_steps": max_optimizer_steps,
+            "train/max_micro_steps": max_micro_steps if max_micro_steps is not None else 0,
             "train/device_batch_size": device_batch_size,
             "train/effective_batch_size": effective_batch_size,
             "train/accumulation_steps": accumulation_steps,

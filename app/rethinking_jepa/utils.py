@@ -53,6 +53,21 @@ def resolve_batch_settings(cfg: dict) -> tuple[int, int, int]:
     return device_batch_size, effective_batch_size, accumulation_steps
 
 
+def resolve_training_horizon(cfg: dict, accumulation_steps: int) -> tuple[int, int | None]:
+    train_cfg = cfg["train"]
+    max_micro_steps_cfg = train_cfg.get("max_micro_steps")
+    if max_micro_steps_cfg is not None:
+        max_micro_steps = int(max_micro_steps_cfg)
+        if max_micro_steps <= 0:
+            raise ValueError(f"train.max_micro_steps must be positive, got {max_micro_steps}")
+        return math.ceil(max_micro_steps / accumulation_steps), max_micro_steps
+
+    max_steps = int(train_cfg["max_steps"])
+    if max_steps <= 0:
+        raise ValueError(f"train.max_steps must be positive, got {max_steps}")
+    return max_steps, None
+
+
 def build_teacher_from_cfg(cfg: dict, device: torch.device) -> tuple[TeacherModel, dict]:
     model_cfg = resolve_model_config(cfg["model"])
     teacher = TeacherModel(
@@ -107,10 +122,15 @@ def build_student_from_cfg(cfg: dict, teacher: TeacherModel, device: torch.devic
     return student
 
 
-def build_scheduler(cfg: dict, optimizer: torch.optim.Optimizer) -> CosineScheduler:
+def build_scheduler(
+    cfg: dict,
+    optimizer: torch.optim.Optimizer,
+    *,
+    total_steps: int | None = None,
+) -> CosineScheduler:
     return CosineScheduler(
         optimizer=optimizer,
-        total_steps=cfg["train"]["max_steps"],
+        total_steps=cfg["train"]["max_steps"] if total_steps is None else total_steps,
         warmup_steps=cfg["optimizer"]["warmup_steps"],
         start_lr=cfg["optimizer"]["start_lr"],
         peak_lr=cfg["optimizer"]["lr"],

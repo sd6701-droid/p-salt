@@ -3,7 +3,13 @@ app: rethinking_jepa.train
 data:
   source: squashfs
   archive_path: /projects/work/public/ml-datasets/kinetics/kinetics-400-res256.sqf
-  max_samples: 1000
+  class_names:
+    - abseiling
+    - air_drumming
+    - applauding
+    - archery
+    - arm_wrestling
+  max_samples_per_class: 100
   sample_seed: 0
   frames: 16
   frame_step: 4
@@ -50,5 +56,6 @@ train:
   device_batch_size: 2
   num_workers: 0
   steps_per_epoch_scale: 1
-  max_steps: 5
+  max_steps: 9
+  max_micro_steps: 12500
   checkpoint_path: results/checkpoints/teacher_vit_small_kinetics400_local_sqf.pt
