@@ -50,6 +50,44 @@ def random_resized_crop_video(
     return resized.permute(1, 0, 2, 3).contiguous()
 
 
+def _read_video_frames(path: str | Path) -> torch.Tensor:
+    path = str(path)
+    try:
+        from torchvision.io import read_video
+    except ImportError:
+        read_video = None
+    except Exception:
+        read_video = None
+
+    if read_video is not None:
+        try:
+            video, _, _ = read_video(path, pts_unit="sec")
+            if video.ndim == 4 and video.size(0) > 0:
+                return video
+        except Exception:
+            pass
+
+    try:
+        import av
+    except ImportError as exc:
+        raise ImportError(
+            "Local video loading requires either torchvision.io.read_video or the 'av' package. "
+            "Install PyAV with `pip install av` if your torchvision build lacks video decoding."
+        ) from exc
+
+    frames: list[torch.Tensor] = []
+    with av.open(path) as container:
+        video_stream = next((stream for stream in container.streams if stream.type == "video"), None)
+        if video_stream is None:
+            raise ValueError(f"No video stream found in '{path}'")
+        for frame in container.decode(video=0):
+            frames.append(torch.from_numpy(frame.to_ndarray(format="rgb24")))
+
+    if not frames:
+        raise ValueError(f"No decoded frames found in '{path}'")
+    return torch.stack(frames, dim=0)
+
+
 class SyntheticVideoDataset(Dataset[torch.Tensor]):
     def __init__(
         self,
@@ -130,17 +168,8 @@ class VideoFileDataset(Dataset[torch.Tensor]):
         return video.permute(3, 0, 1, 2).contiguous()
 
     def __getitem__(self, index: int) -> torch.Tensor:
-        try:
-            from torchvision.io import read_video
-        except ImportError as exc:
-            raise ImportError(
-                "Local video loading requires torchvision video I/O support. "
-                "Your current torchvision build does not expose torchvision.io.read_video. "
-                "Use data.source='huggingface' for streaming, or install a torchvision build "
-                "with video support for local file decoding."
-            ) from exc
         path = self.video_paths[index]
-        video, _, _ = read_video(str(path), pts_unit="sec")
+        video = _read_video_frames(path)
         clip = self._sample_clip(video)
         if self.augmentation is not None:
             clip = random_resized_crop_video(clip, self.augmentation)
@@ -342,19 +371,10 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
         return temp_path
 
     def __getitem__(self, index: int) -> torch.Tensor:
-        try:
-            from torchvision.io import read_video
-        except ImportError as exc:
-            raise ImportError(
-                "Local video loading requires torchvision video I/O support. "
-                "Your current torchvision build does not expose torchvision.io.read_video. "
-                "Install a torchvision build with video support for local file decoding."
-            ) from exc
-
         archive_entry = self.archive_entries[index]
         temp_path = self._extract_archive_entry(archive_entry)
         try:
-            video, _, _ = read_video(str(temp_path), pts_unit="sec")
+            video = _read_video_frames(temp_path)
         finally:
             temp_path.unlink(missing_ok=True)
         clip = self._sample_clip(video)

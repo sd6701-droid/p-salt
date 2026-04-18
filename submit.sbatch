@@ -8,14 +8,15 @@
 #SBATCH --time=04:00:00
 #SBATCH --account=torch_pr_230_tandon_priority
 #SBATCH --job-name=salt_teacher
-#SBATCH --output=/scratch/sd6701/logs/teacher_%j.log
+#SBATCH --output=/scratch/sd6701/salt/p-salt/logs/teacher_%j.log
+#SBATCH --error=/scratch/sd6701/salt/p-salt/logs/teacher_%j.err
 
 source /scratch/sd6701/miniconda3/etc/profile.d/conda.sh
 conda activate salt
 
 export LD_LIBRARY_PATH=/scratch/sd6701/miniconda3/envs/salt/lib:$LD_LIBRARY_PATH
 
+mkdir -p /scratch/sd6701/salt/p-salt/logs
 
 python3 app/main.py --config configs/teacher_kinetics400_local_sqf.yaml
-
 
