@@ -53,8 +53,8 @@ wandb:
 
 train:
   global_batch_size: 64
-  device_batch_size: 2
-  num_workers: 8
+  device_batch_size: 32
+  num_workers: 0
   steps_per_epoch_scale: 1
-  max_steps: 5000
+  max_steps: 1000
   checkpoint_path: results/checkpoints/teacher_vit_small_kinetics400_local_sqf.pt
