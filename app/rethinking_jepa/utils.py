@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
@@ -29,6 +31,26 @@ def build_loader(cfg: dict) -> DataLoader:
         shuffle=not isinstance(dataset, IterableDataset),
         num_workers=train_num_workers,
     )
+
+
+def resolve_batch_settings(cfg: dict) -> tuple[int, int, int]:
+    train_cfg = cfg["train"]
+    device_batch_size = int(train_cfg["device_batch_size"])
+    global_batch_size = int(train_cfg.get("global_batch_size", device_batch_size))
+
+    if device_batch_size <= 0:
+        raise ValueError(f"train.device_batch_size must be positive, got {device_batch_size}")
+    if global_batch_size <= 0:
+        raise ValueError(f"train.global_batch_size must be positive, got {global_batch_size}")
+    if global_batch_size < device_batch_size:
+        raise ValueError(
+            "train.global_batch_size must be >= train.device_batch_size "
+            f"(got {global_batch_size} < {device_batch_size})"
+        )
+
+    accumulation_steps = math.ceil(global_batch_size / device_batch_size)
+    effective_batch_size = device_batch_size * accumulation_steps
+    return device_batch_size, effective_batch_size, accumulation_steps
 
 
 def build_teacher_from_cfg(cfg: dict, device: torch.device) -> tuple[TeacherModel, dict]:

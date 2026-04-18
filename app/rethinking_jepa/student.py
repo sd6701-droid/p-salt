@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import traceback
 from pathlib import Path
 
 import torch
@@ -11,29 +12,56 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from app.rethinking_jepa.utils import (
         build_loader,
+        resolve_batch_settings,
         build_scheduler,
         build_student_from_cfg,
         build_teacher_from_cfg,
         resolve_device,
         sample_mask_from_model,
     )
-    from src.utils import finish_wandb_run, init_wandb_run, load_config, log_wandb_metrics
+    from src.utils import (
+        checkpoint_paths,
+        finish_wandb_run,
+        init_wandb_run,
+        load_config,
+        log_wandb_metrics,
+        prepare_run_directory,
+        redirect_run_logs,
+    )
 else:
     from app.rethinking_jepa.utils import (
         build_loader,
+        resolve_batch_settings,
         build_scheduler,
         build_student_from_cfg,
         build_teacher_from_cfg,
         resolve_device,
         sample_mask_from_model,
     )
-    from src.utils import finish_wandb_run, init_wandb_run, load_config, log_wandb_metrics
+    from src.utils import (
+        checkpoint_paths,
+        finish_wandb_run,
+        init_wandb_run,
+        load_config,
+        log_wandb_metrics,
+        prepare_run_directory,
+        redirect_run_logs,
+    )
 
 
-def _save_student_checkpoint(student: nn.Module, checkpoint_path: Path, step: int) -> None:
+def _save_student_checkpoint(
+    student: nn.Module,
+    checkpoint_path: Path,
+    *,
+    label: str,
+    step: int,
+    loss: float,
+) -> None:
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(student.state_dict(), checkpoint_path)
-    print(f"student checkpoint saved step={step} path={checkpoint_path}")
+    print(
+        f"{label} student checkpoint saved step={step} loss={loss:.6f} path={checkpoint_path}"
+    )
 
 
 def run(cfg: dict) -> None:
@@ -43,6 +71,8 @@ def run(cfg: dict) -> None:
 
     student = build_student_from_cfg(cfg, teacher, device)
     loader = build_loader(cfg)
+    device_batch_size, effective_batch_size, accumulation_steps = resolve_batch_settings(cfg)
+    best_checkpoint_path, last_checkpoint_path = checkpoint_paths(cfg)
     wandb_run = init_wandb_run(cfg, job_type="student-train")
     optimizer = torch.optim.AdamW(
         student.parameters(),
@@ -52,47 +82,91 @@ def run(cfg: dict) -> None:
     scheduler = build_scheduler(cfg, optimizer)
     criterion = nn.SmoothL1Loss()
     step = 0
-    checkpoint_path = Path(cfg["train"]["checkpoint_path"]).expanduser()
-    checkpoint_every_steps = int(cfg["train"].get("checkpoint_every_steps", 50))
     init_ckpt = cfg.get("student", {}).get("init_from_dinov2_checkpoint")
 
     student.train()
-    for step, video in enumerate(loader, start=1):
-        video = video.to(device)
-        lr, wd = scheduler.step(step - 1)
-        mask = sample_mask_from_model(student.student.patch_embed, video, cfg, device)
-        out = student(video, mask)
-        loss = criterion(out.prediction, out.target)
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        nn.utils.clip_grad_norm_(student.parameters(), cfg["optimizer"]["clip_grad"])
-        optimizer.step()
-        print(
-            f"student step={step} loss={loss.item():.6f} "
-            f"lr={lr:.7f} wd={wd:.4f}"
-        )
-        log_wandb_metrics(
-            wandb_run,
-            {
-                "train/step": step,
-                "train/loss": float(loss.item()),
-                "train/lr": float(lr),
-                "train/weight_decay": float(wd),
-            },
-        )
-        if checkpoint_every_steps > 0 and step % checkpoint_every_steps == 0:
-            _save_student_checkpoint(student, checkpoint_path, step)
-        if step >= cfg["train"]["max_steps"]:
-            break
+    optimizer.zero_grad(set_to_none=True)
+    micro_step = 0
+    running_loss = 0.0
+    running_micro_batches = 0
+    best_loss = float("inf")
 
-    _save_student_checkpoint(student, checkpoint_path, step)
+    while step < cfg["train"]["max_steps"]:
+        saw_batch = False
+        for video in loader:
+            saw_batch = True
+            micro_step += 1
+            video = video.to(device)
+            mask = sample_mask_from_model(student.student.patch_embed, video, cfg, device)
+            out = student(video, mask)
+            loss = criterion(out.prediction, out.target)
+            (loss / accumulation_steps).backward()
+            running_loss += float(loss.item())
+            running_micro_batches += 1
+
+            if micro_step % accumulation_steps != 0:
+                continue
+
+            step += 1
+            lr, wd = scheduler.step(step - 1)
+            nn.utils.clip_grad_norm_(student.parameters(), cfg["optimizer"]["clip_grad"])
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            mean_loss = running_loss / max(1, running_micro_batches)
+            _save_student_checkpoint(
+                student,
+                last_checkpoint_path,
+                label="last",
+                step=step,
+                loss=mean_loss,
+            )
+            if mean_loss < best_loss:
+                best_loss = mean_loss
+                _save_student_checkpoint(
+                    student,
+                    best_checkpoint_path,
+                    label="best",
+                    step=step,
+                    loss=mean_loss,
+                )
+            print(
+                f"student step={step} micro_step={micro_step} loss={mean_loss:.6f} "
+                f"lr={lr:.7f} wd={wd:.4f} effective_batch={effective_batch_size}"
+            )
+            log_wandb_metrics(
+                wandb_run,
+                {
+                    "train/step": step,
+                    "train/micro_step": micro_step,
+                    "train/loss": mean_loss,
+                    "train/lr": float(lr),
+                    "train/weight_decay": float(wd),
+                    "train/device_batch_size": device_batch_size,
+                    "train/effective_batch_size": effective_batch_size,
+                    "train/accumulation_steps": accumulation_steps,
+                },
+            )
+            running_loss = 0.0
+            running_micro_batches = 0
+            if step >= cfg["train"]["max_steps"]:
+                break
+
+        if not saw_batch:
+            raise RuntimeError("Training loader yielded no batches.")
+
     finish_wandb_run(
         wandb_run,
         summary={
-            "train/checkpoint_path": str(checkpoint_path),
             "train/final_step": step,
-            "train/checkpoint_every_steps": checkpoint_every_steps,
             "train/teacher_checkpoint": str(cfg["train"]["teacher_checkpoint"]),
+            "train/device_batch_size": device_batch_size,
+            "train/effective_batch_size": effective_batch_size,
+            "train/accumulation_steps": accumulation_steps,
+            "train/best_loss": best_loss,
+            "train/run_id": str(cfg["runtime"]["run_id"]),
+            "train/run_dir": str(cfg["runtime"]["run_dir"]),
+            "train/best_checkpoint_path": str(best_checkpoint_path),
+            "train/last_checkpoint_path": str(last_checkpoint_path),
             "train/student_init_checkpoint": str(init_ckpt) if init_ckpt else "",
             "model/teacher_architecture": str(cfg["model"]["architecture"]),
             "model/student_architecture": str(
@@ -103,12 +177,20 @@ def run(cfg: dict) -> None:
 
 
 def main(cfg: dict | None = None) -> None:
+    config_path: str | None = None
     if cfg is None:
         parser = argparse.ArgumentParser()
         parser.add_argument("--config", required=True)
         args = parser.parse_args()
+        config_path = args.config
         cfg = load_config(args.config)
-    run(cfg)
+    prepare_run_directory(cfg, config_path=config_path, app_name="rethinking_jepa.student")
+    with redirect_run_logs(cfg):
+        try:
+            run(cfg)
+        except Exception:
+            traceback.print_exc()
+            raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

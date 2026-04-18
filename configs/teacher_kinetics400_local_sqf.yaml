@@ -27,9 +27,9 @@ model:
   patch_size: 16
 
 optimizer:
-  start_lr: 0.0002  #update
-  lr: 0.000625  # update
-  final_lr: 0.000001
+  start_lr: 0.0002
+  lr: 0.000625
+  final_lr: 1.0e-6
   start_weight_decay: 0.04
   end_weight_decay: 0.4
   clip_grad: 0.02

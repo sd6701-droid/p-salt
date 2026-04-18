@@ -69,7 +69,7 @@ def init_wandb_run(cfg: dict[str, Any], *, job_type: str) -> Any | None:
     mode = os.environ.get("WANDB_MODE") or wandb_cfg.get("mode") or "online"
     tags = list(wandb_cfg.get("tags", []))
     group = wandb_cfg.get("group")
-    save_dir = wandb_cfg.get("dir")
+    save_dir = wandb_cfg.get("dir") or cfg.get("runtime", {}).get("run_dir")
     fallback_to_offline = bool(wandb_cfg.get("fallback_to_offline", False))
 
     init_kwargs = {

@@ -136,10 +136,12 @@ video columns are decoded through `torchcodec`, and `ffmpeg` must also be availa
 
 ## Notes
 
-- `global_batch_size: 3072` is tracked in the config to match the paper, while
-  `device_batch_size` stays small enough for a local run.
+- `global_batch_size` is used as the effective optimizer batch size via
+  gradient accumulation, while `device_batch_size` controls the per-device
+  micro-batch that must fit in memory.
 - The repo still uses a synthetic dataset for smoke tests, so this is closer to
   the paper's training recipe but not yet a full reproduction.
-- Each architecture writes a different checkpoint file so switching between
-  `vit_small` and `vit_base` does not reuse incompatible weights by accident.
+- Each training run now gets a random run folder under `results/checkpoints/`
+  with `best/checkpoint.pth`, `last/checkpoint.pth`, `config.yaml`,
+  `log.out`, and `log.err`.
 # p-salt
