@@ -52,10 +52,9 @@ wandb:
   tags: [teacher, kinetics400, local, squashfs, vit-small]
 
 train:
-  global_batch_size: 3072
+  global_batch_size: 64
   device_batch_size: 2
-  num_workers: 0
+  num_workers: 8
   steps_per_epoch_scale: 1
-  max_steps: 9
-  max_micro_steps: 12500
+  max_steps: 5000
   checkpoint_path: results/checkpoints/teacher_vit_small_kinetics400_local_sqf.pt

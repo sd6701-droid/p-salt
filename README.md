@@ -136,9 +136,9 @@ video columns are decoded through `torchcodec`, and `ffmpeg` must also be availa
 
 ## Notes
 
-- `global_batch_size` is used as the effective optimizer batch size via
-  gradient accumulation, while `device_batch_size` controls the per-device
-  micro-batch that must fit in memory.
+- the current trainers step once per dataloader batch, so `device_batch_size`
+  is the true runtime batch size; some configs still keep `global_batch_size`
+  as recipe metadata.
 - The repo still uses a synthetic dataset for smoke tests, so this is closer to
   the paper's training recipe but not yet a full reproduction.
 - Each training run now gets a random run folder under `results/checkpoints/`

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
@@ -25,47 +23,36 @@ def resolve_device() -> torch.device:
 def build_loader(cfg: dict) -> DataLoader:
     dataset = build_video_dataset(cfg)
     train_num_workers = int(cfg["train"].get("num_workers", 0))
+    loader_kwargs = {
+        "batch_size": cfg["train"]["device_batch_size"],
+        "shuffle": not isinstance(dataset, IterableDataset),
+        "num_workers": train_num_workers,
+        "pin_memory": torch.cuda.is_available(),
+    }
+    if train_num_workers > 0:
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = int(cfg["train"].get("prefetch_factor", 2))
     return DataLoader(
         dataset,
-        batch_size=cfg["train"]["device_batch_size"],
-        shuffle=not isinstance(dataset, IterableDataset),
-        num_workers=train_num_workers,
+        **loader_kwargs,
     )
 
 
-def resolve_batch_settings(cfg: dict) -> tuple[int, int, int]:
+def resolve_batch_settings(cfg: dict) -> tuple[int, int]:
     train_cfg = cfg["train"]
     device_batch_size = int(train_cfg["device_batch_size"])
-    global_batch_size = int(train_cfg.get("global_batch_size", device_batch_size))
 
     if device_batch_size <= 0:
         raise ValueError(f"train.device_batch_size must be positive, got {device_batch_size}")
-    if global_batch_size <= 0:
-        raise ValueError(f"train.global_batch_size must be positive, got {global_batch_size}")
-    if global_batch_size < device_batch_size:
-        raise ValueError(
-            "train.global_batch_size must be >= train.device_batch_size "
-            f"(got {global_batch_size} < {device_batch_size})"
-        )
-
-    accumulation_steps = math.ceil(global_batch_size / device_batch_size)
-    effective_batch_size = device_batch_size * accumulation_steps
-    return device_batch_size, effective_batch_size, accumulation_steps
+    effective_batch_size = device_batch_size
+    return device_batch_size, effective_batch_size
 
 
-def resolve_training_horizon(cfg: dict, accumulation_steps: int) -> tuple[int, int | None]:
-    train_cfg = cfg["train"]
-    max_micro_steps_cfg = train_cfg.get("max_micro_steps")
-    if max_micro_steps_cfg is not None:
-        max_micro_steps = int(max_micro_steps_cfg)
-        if max_micro_steps <= 0:
-            raise ValueError(f"train.max_micro_steps must be positive, got {max_micro_steps}")
-        return math.ceil(max_micro_steps / accumulation_steps), max_micro_steps
-
-    max_steps = int(train_cfg["max_steps"])
+def resolve_max_steps(cfg: dict) -> int:
+    max_steps = int(cfg["train"]["max_steps"])
     if max_steps <= 0:
         raise ValueError(f"train.max_steps must be positive, got {max_steps}")
-    return max_steps, None
+    return max_steps
 
 
 def build_teacher_from_cfg(cfg: dict, device: torch.device) -> tuple[TeacherModel, dict]:
