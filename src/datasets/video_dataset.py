@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import math
 import random
+import shutil
 import subprocess
 import tempfile
 import urllib.request
@@ -336,31 +337,18 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
             video = video.index_select(0, indices)
         return video.permute(3, 0, 1, 2).contiguous()
 
-    def _extract_archive_entry(self, entry: str) -> Path:
-        suffix = Path(entry).suffix or ".mp4"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
-            temp_path = Path(handle.name)
+    def _extract_archive_entry(self, entry: str, output_dir: Path) -> Path:
+        sqfscat = shutil.which("sqfscat")
+        if sqfscat is not None:
+            temp_path = output_dir / (Path(entry).name or "video.mp4")
             try:
-                try:
-                    result = subprocess.run(
-                        ["sqfscat", str(self.archive_path), entry],
+                with temp_path.open("wb") as handle:
+                    subprocess.run(
+                        [sqfscat, str(self.archive_path), entry],
                         check=True,
                         stdout=handle,
                         stderr=subprocess.PIPE,
                     )
-                except FileNotFoundError:
-                    result = subprocess.run(
-                        ["unsquashfs", "-cat", str(self.archive_path), entry],
-                        check=True,
-                        stdout=handle,
-                        stderr=subprocess.PIPE,
-                    )
-            except FileNotFoundError as exc:
-                temp_path.unlink(missing_ok=True)
-                raise RuntimeError(
-                    "Reading videos from a SquashFS archive requires either 'sqfscat' or "
-                    "'unsquashfs' from squashfs-tools to be available on PATH."
-                ) from exc
             except subprocess.CalledProcessError as exc:
                 temp_path.unlink(missing_ok=True)
                 stderr = exc.stderr.decode("utf-8", errors="replace").strip()
@@ -368,15 +356,46 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
                     f"Failed to extract '{entry}' from SquashFS archive '{self.archive_path}': "
                     f"{stderr or exc}"
                 ) from exc
-        return temp_path
+            return temp_path
+
+        unsquashfs = shutil.which("unsquashfs")
+        if unsquashfs is None:
+            raise RuntimeError(
+                "Reading videos from a SquashFS archive requires either 'sqfscat' or "
+                "'unsquashfs' from squashfs-tools to be available on PATH."
+            )
+
+        try:
+            subprocess.run(
+                [unsquashfs, "-f", "-no-progress", "-d", str(output_dir), str(self.archive_path), entry],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"Failed to extract '{entry}' from SquashFS archive '{self.archive_path}': "
+                f"{stderr or exc}"
+            ) from exc
+
+        extracted_path = output_dir / entry
+        if extracted_path.exists():
+            return extracted_path
+
+        fallback = next(output_dir.rglob(Path(entry).name), None)
+        if fallback is None:
+            raise RuntimeError(
+                f"Extracted '{entry}' from '{self.archive_path}', but could not find the output file "
+                f"under '{output_dir}'."
+            )
+        return fallback
 
     def __getitem__(self, index: int) -> torch.Tensor:
         archive_entry = self.archive_entries[index]
-        temp_path = self._extract_archive_entry(archive_entry)
-        try:
-            video = _read_video_frames(temp_path)
-        finally:
-            temp_path.unlink(missing_ok=True)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            extracted_path = self._extract_archive_entry(archive_entry, Path(temp_dir))
+            video = _read_video_frames(extracted_path)
         clip = self._sample_clip(video)
         if self.augmentation is not None:
             clip = random_resized_crop_video(clip, self.augmentation)
