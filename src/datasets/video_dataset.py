@@ -393,7 +393,10 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
             cached_path.parent.mkdir(parents=True, exist_ok=True)
 
         if self.sqfscat_path is not None:
-            target_path = cached_path if cached_path is not None else output_dir / (Path(entry).name or "video.mp4")
+            # Preserve the archive's relative folder structure so downstream code can
+            # still infer class names from parent directories after extraction.
+            target_path = cached_path if cached_path is not None else output_dir / entry
+            target_path.parent.mkdir(parents=True, exist_ok=True)
             temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
             try:
                 with temp_path.open("wb") as handle:
