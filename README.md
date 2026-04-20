@@ -23,11 +23,11 @@ sanity checks.
 ## Layout
 
 - `app/main.py`: config-driven launcher in the same spirit as `vjepa2/app/main.py`
+- `app/rethinking_jepa/extract_squashfs_subset.py`: stage-0 subset extraction from squashfs archives
 - `app/rethinking_jepa/train.py`: stage-1 teacher training
 - `app/rethinking_jepa/student.py`: stage-2 frozen-teacher student training
-- `app/rethinking_jepa/prepare_kinetics700_subset.py`: local subset extraction helper
 - `src/models`: ViT presets, encoder, predictor, and JEPA teacher/student models
-- `src/datasets`: synthetic, local-video, Hugging Face, and mixture dataset loaders
+- `src/datasets`: synthetic and local-video dataset loaders
 - `src/masks`: token and 3D block masking utilities
 - `src/utils`: config loading and schedulers
 - `rethinking_jepa`: compatibility exports so older imports still work
@@ -35,45 +35,27 @@ sanity checks.
 ## Quickstart
 
 ```bash
-python3 train_teacher.py --config configs/teacher.yaml
-python3 train_student.py --config configs/student.yaml
-python3 app/main.py --config configs/teacher.yaml
-python3 app/main.py --config configs/student.yaml
+python3 app/main.py --config configs/extract_kinetics400_local_sqf.yaml
+python3 app/main.py --config configs/teacher_kinetics400_local_extracted.yaml
+python3 app/main.py --config configs/student_kinetics400_local_extracted.yaml
 ```
 
-To try another ViT backbone, swap the config:
+To run the architecture smoke test with the kept config:
 
 ```bash
-python3 train_teacher.py --config configs/teacher_vit_base.yaml
-python3 train_student.py --config configs/student_vit_base.yaml
-python3 test_architectures.py --config configs/teacher.yaml --architectures vit_tiny vit_small vit_base
+python3 test_architectures.py --config configs/teacher_kinetics400_local_extracted.yaml --architectures vit_tiny vit_small vit_base
 ```
 
-By default both scripts use a synthetic dataset, which makes it easy to test the
-training code path before wiring in a real video loader.
-
-To point training at real video files, use one of the example configs:
-
-```bash
-python3 train_teacher.py --config configs/teacher_real_video.yaml
-python3 train_teacher.py --config configs/teacher_v36m_mixture.yaml
-python3 train_student.py --config configs/student_v36m_mixture.yaml
-```
-
-To stream a manageable subset of the Hugging Face `bitmind/Kinetics-700` dataset directly during training:
-
-```bash
-python3 train_teacher.py --config configs/teacher_kinetics700_hf.yaml
-python3 train_student.py --config configs/student_kinetics700_hf.yaml
-```
-
-Those configs keep the run bounded with `max_samples: 1000`, so only a shuffled subset is consumed on the fly.
+This repository is currently trimmed to the Kinetics-400 extracted-file workflow:
+- Stage 0 extracts the selected subset from squashfs into `/scratch`
+- Stage 1 trains the teacher from the extracted local files
+- Stage 2 trains the student from the same extracted local files
 
 ## W&B Logging
 
 Teacher training can log metrics to Weights & Biases when `wandb.enabled: true`
 is set in the config. The training loop logs `train/loss`, `train/lr`, and
-`train/weight_decay` every step.
+`train/weight_decay` at the configured `train.log_interval`.
 
 Put your token in `.env` at the repo root:
 
@@ -85,62 +67,18 @@ Then enable the `wandb` block in the teacher config and run training as usual.
 If your workspace blocks online writes, set `WANDB_MODE=offline` in `.env` or keep
 `fallback_to_offline: true` in the config so training continues and stores local W&B logs.
 
-If you prefer to materialize a local subset first:
-
-```bash
-python3 prepare_kinetics700_subset.py --max-videos 1000
-python3 train_teacher.py --config configs/teacher_kinetics700_subset.yaml
-python3 train_student.py --config configs/student_kinetics700_subset.yaml
-```
-
 The real-video loader supports:
 
 - `data.source: real`: read videos from a single `root` directory or `manifest`
-- `data.source: huggingface`: stream videos directly from a Hugging Face dataset repo
-- `data.source: mixture`: concatenate multiple datasets listed under `data.datasets`
 - manifest files in `.txt` format (one path per line) or `.csv` format with a `path` column
 - optional `max_samples` and `sample_seed` to train on a partial subset of a larger dataset
-
-## Datasets From The Paper
-
-The paper's pretraining data mixture is:
-
-- `Kinetics-710 (K710)`: Kinetics-400/600/700 merged, with validation samples removed
-- `Something-Something V2 (SSV2)`
-- `Panda70M` 2.8M-video subset
-- combined as `V-3.6M`
-
-The paper's frozen-backbone evaluation datasets are:
-
-- `Kinetics-400`
-- `Something-Something V2`
-- `COIN`
-- `Jester`
-- `Diving48`
-- `ImageNet-1K` using repeated frames
-
-This repo now includes config scaffolding to train on those paper-style pretraining datasets once you provide
-your own local manifests or dataset roots.
-
-## Hugging Face Kinetics-700
-
-The public `bitmind/Kinetics-700` dataset on Hugging Face currently exposes a single `train` split with
-roughly `491,660` rows and a `video` column. In practice this is too large for a quick local experiment, so
-this repo now supports two practical options:
-
-- direct streaming from Hugging Face with `data.source: huggingface`
-- local subset extraction with `prepare_kinetics700_subset.py`
-
-For Hugging Face streaming, install dependencies from `requirements.txt`. The `datasets` docs note that
-video columns are decoded through `torchcodec`, and `ffmpeg` must also be available on your system.
 
 ## Notes
 
 - the current trainers step once per dataloader batch, so `device_batch_size`
   is the true runtime batch size; some configs still keep `global_batch_size`
   as recipe metadata.
-- The repo still uses a synthetic dataset for smoke tests, so this is closer to
-  the paper's training recipe but not yet a full reproduction.
+- The active configs all use the extracted local Kinetics-400 subset workflow.
 - Each training run now gets a random run folder under `results/checkpoints/`
   with `best/checkpoint.pth`, `last/checkpoint.pth`, `config.yaml`,
   `log.out`, and `log.err`.

@@ -1,0 +1,19 @@
+app: rethinking_jepa.extract_squashfs_subset
+
+data:
+  archive_path: /projects/work/public/ml-datasets/kinetics/kinetics-400-res256.sqf
+  output_dir: /scratch/sd6701/salt/p-salt/data/kinetics400_subset
+  manifest_path: /scratch/sd6701/salt/p-salt/data/kinetics400_subset/manifest.txt
+  class_names:
+    - abseiling
+    - air_drumming
+    - applauding
+    - archery
+    - arm_wrestling
+  max_samples_per_class: 100
+  sample_seed: 0
+  progress_interval: 25
+  channels: 3
+  frames: 16
+  frame_step: 4
+  image_size: 224

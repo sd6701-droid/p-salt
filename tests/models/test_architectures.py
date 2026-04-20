@@ -20,7 +20,7 @@ def count_parameters(model: torch.nn.Module) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/teacher.yaml")
+    parser.add_argument("--config", default="configs/teacher_kinetics400_local_extracted.yaml")
     parser.add_argument(
         "--architectures",
         nargs="*",

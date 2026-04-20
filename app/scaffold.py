@@ -4,6 +4,7 @@ import importlib
 
 
 APP_MODULES = {
+    "rethinking_jepa.extract_squashfs_subset": "app.rethinking_jepa.extract_squashfs_subset",
     "rethinking_jepa.linear_probe_student_imagenet": "app.rethinking_jepa.linear_probe_student_imagenet",
     "rethinking_jepa.prepare_imagenet_probe_subset": "app.rethinking_jepa.prepare_imagenet_probe_subset",
     "rethinking_jepa.eval_probe_student_imagenet": "app.rethinking_jepa.eval_probe_student_imagenet",

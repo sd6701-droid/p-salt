@@ -2,13 +2,12 @@ app: rethinking_jepa.student
 
 data:
   source: real
-  manifest: data/kinetics700_subset/manifest.txt
-  max_samples: 1000
+  manifest: /scratch/sd6701/salt/p-salt/data/kinetics400_subset/manifest.txt
+  max_samples: 500
   sample_seed: 0
-  num_samples: 64
   frames: 16
   frame_step: 4
-  image_size: 64
+  image_size: 256
   input_size: 224
 
 augmentation:
@@ -42,10 +41,22 @@ optimizer:
   warmup_steps: 10000
   betas: [0.9, 0.95]
 
+wandb:
+  enabled: true
+  project: rethinking-jepa
+  fallback_to_offline: true
+  name: student-vit-small-kinetics400-local-extracted
+  tags: [student, kinetics400, local, extracted, vit-small]
+
 train:
   global_batch_size: 3072
   device_batch_size: 2
+  num_workers: 8
+  prefetch_factor: 4
+  checkpoint_interval: 100
+  log_interval: 10
+  precision: bf16
   steps_per_epoch_scale: 1
   max_steps: 5
-  teacher_checkpoint: results/checkpoints/teacher_vit_small_kinetics700_subset.pt
-  checkpoint_path: results/checkpoints/student_vit_small_kinetics700_subset.pt
+  teacher_checkpoint: results/checkpoints/teacher_vit_small_kinetics400_local_extracted.pt
+  checkpoint_path: results/checkpoints/student_vit_small_kinetics400_local_extracted.pt

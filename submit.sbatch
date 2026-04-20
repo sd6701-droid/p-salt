@@ -18,5 +18,4 @@ export LD_LIBRARY_PATH=/scratch/sd6701/miniconda3/envs/salt/lib:$LD_LIBRARY_PATH
 
 mkdir -p /scratch/sd6701/salt/p-salt/logs
 
-python3 app/main.py --config configs/teacher_kinetics400_local_sqf.yaml
-
+python3 app/main.py --config configs/teacher_kinetics400_local_extracted.yaml
