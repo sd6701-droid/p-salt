@@ -126,6 +126,115 @@ def _read_video_frames(path: str | Path) -> torch.Tensor:
     return torch.stack(frames, dim=0)
 
 
+def _sample_frame_indices(total_frames: int, frames: int, frame_step: int) -> list[int]:
+    if total_frames <= 0:
+        raise ValueError("Encountered a video with zero frames")
+
+    total_needed = frames * frame_step
+    if total_frames >= total_needed:
+        max_start = total_frames - total_needed
+        start = 0 if max_start == 0 else random.randint(0, max_start)
+        return list(range(start, start + total_needed, frame_step))
+
+    return torch.linspace(0, total_frames - 1, frames).round().long().tolist()
+
+
+def _estimate_video_frame_count_from_av(container: Any, stream: Any) -> int | None:
+    try:
+        import av
+    except ImportError:
+        return None
+
+    try:
+        if getattr(stream, "frames", 0):
+            count = int(stream.frames)
+            if count > 0:
+                return count
+
+        fps = float(stream.average_rate) if stream.average_rate is not None else None
+        if stream.duration is not None and stream.time_base is not None:
+            duration_seconds = float(stream.duration * stream.time_base)
+        elif container.duration is not None:
+            duration_seconds = float(container.duration / av.time_base)
+        else:
+            duration_seconds = None
+
+        if fps is not None and duration_seconds is not None:
+            estimated = int(round(fps * duration_seconds))
+            if estimated > 0:
+                return estimated
+    except Exception:
+        return None
+
+    return None
+
+
+def _read_video_clip_with_av(
+    path: str | Path,
+    *,
+    frames: int,
+    frame_step: int,
+) -> torch.Tensor | None:
+    try:
+        import av
+    except ImportError:
+        return None
+
+    selected: list[torch.Tensor] = []
+    try:
+        with av.open(str(path)) as container:
+            video_stream = next((stream for stream in container.streams if stream.type == "video"), None)
+            if video_stream is None:
+                raise ValueError(f"No video stream found in '{path}'")
+            total_frames = _estimate_video_frame_count_from_av(container, video_stream)
+            if total_frames is None:
+                return None
+
+            target_indices = _sample_frame_indices(total_frames, frames, frame_step)
+            remaining = dict.fromkeys(target_indices, 0)
+            for index in target_indices:
+                remaining[index] = remaining.get(index, 0) + 1
+
+            max_target_index = max(target_indices)
+            for frame_index, frame in enumerate(container.decode(video=0)):
+                if frame_index > max_target_index and not remaining:
+                    break
+
+                repeat_count = remaining.pop(frame_index, 0)
+                if repeat_count <= 0:
+                    continue
+
+                frame_tensor = torch.from_numpy(frame.to_ndarray(format="rgb24"))
+                selected.append(frame_tensor)
+                for _ in range(repeat_count - 1):
+                    selected.append(frame_tensor.clone())
+
+                if len(selected) >= len(target_indices):
+                    break
+    except Exception:
+        return None
+
+    if len(selected) != len(target_indices):
+        return None
+
+    return torch.stack(selected, dim=0)
+
+
+def _read_video_clip(
+    path: str | Path,
+    *,
+    frames: int,
+    frame_step: int,
+) -> torch.Tensor:
+    clip = _read_video_clip_with_av(path, frames=frames, frame_step=frame_step)
+    if clip is not None:
+        return clip
+
+    video = _read_video_frames(path)
+    indices = _sample_frame_indices(int(video.size(0)), frames, frame_step)
+    return video.index_select(0, torch.tensor(indices, dtype=torch.long))
+
+
 class SyntheticVideoDataset(Dataset[torch.Tensor]):
     def __init__(
         self,
@@ -193,22 +302,12 @@ class VideoFileDataset(Dataset[torch.Tensor]):
 
     def _sample_clip(self, video: torch.Tensor) -> torch.Tensor:
         video = video.float() / 255.0
-        total_frames = self.frames * self.frame_step
-        if video.size(0) >= total_frames:
-            max_start = video.size(0) - total_frames
-            start = 0 if max_start == 0 else random.randint(0, max_start)
-            video = video[start : start + total_frames : self.frame_step]
-        else:
-            if video.size(0) == 0:
-                raise ValueError("Encountered a video with zero frames")
-            indices = torch.linspace(0, video.size(0) - 1, self.frames).round().long()
-            video = video.index_select(0, indices)
         return video.permute(3, 0, 1, 2).contiguous()
 
     def __getitem__(self, index: int) -> torch.Tensor:
         path = self.video_paths[index]
-        video = _read_video_frames(path)
-        clip = self._sample_clip(video)
+        sampled_frames = _read_video_clip(path, frames=self.frames, frame_step=self.frame_step)
+        clip = self._sample_clip(sampled_frames)
         if self.augmentation is not None:
             clip = random_resized_crop_video(clip, self.augmentation)
         else:
@@ -372,16 +471,6 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
 
     def _sample_clip(self, video: torch.Tensor) -> torch.Tensor:
         video = video.float() / 255.0
-        total_frames = self.frames * self.frame_step
-        if video.size(0) >= total_frames:
-            max_start = video.size(0) - total_frames
-            start = 0 if max_start == 0 else random.randint(0, max_start)
-            video = video[start : start + total_frames : self.frame_step]
-        else:
-            if video.size(0) == 0:
-                raise ValueError("Encountered a video with zero frames")
-            indices = torch.linspace(0, video.size(0) - 1, self.frames).round().long()
-            video = video.index_select(0, indices)
         return video.permute(3, 0, 1, 2).contiguous()
 
     def _extract_archive_entry(self, entry: str, output_dir: Path) -> Path:
@@ -475,12 +564,20 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
         archive_entry = self.archive_entries[index]
         if self.cache_dir is not None:
             extracted_path = self._extract_archive_entry(archive_entry, self.cache_dir)
-            video = _read_video_frames(extracted_path)
+            sampled_frames = _read_video_clip(
+                extracted_path,
+                frames=self.frames,
+                frame_step=self.frame_step,
+            )
         else:
             with tempfile.TemporaryDirectory() as temp_dir:
                 extracted_path = self._extract_archive_entry(archive_entry, Path(temp_dir))
-                video = _read_video_frames(extracted_path)
-        clip = self._sample_clip(video)
+                sampled_frames = _read_video_clip(
+                    extracted_path,
+                    frames=self.frames,
+                    frame_step=self.frame_step,
+                )
+        clip = self._sample_clip(sampled_frames)
         if self.augmentation is not None:
             clip = random_resized_crop_video(clip, self.augmentation)
         else:

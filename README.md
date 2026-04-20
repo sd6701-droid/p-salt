@@ -76,7 +76,7 @@ The real-video loader supports:
 ## Notes
 
 - the current trainers step once per dataloader batch, so `device_batch_size`
-  is the true runtime batch size; some configs still keep `global_batch_size`
+  is the true runtime batch size
   as recipe metadata.
 - The active configs all use the extracted local Kinetics-400 subset workflow.
 - Each training run now gets a random run folder under `results/checkpoints/`

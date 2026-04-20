@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 import sys
 import traceback
 from contextlib import nullcontext
@@ -118,7 +117,6 @@ def run(cfg: dict) -> None:
         for epoch_step, video in enumerate(loader, start=1):
             saw_batch = True
             last_epoch_step = epoch_step
-            step += 1
             video = video.to(device, non_blocking=(device.type == "cuda"))
             mask = sample_mask_from_model(model.encoder.patch_embed, video, cfg, device)
             with _autocast_context(device, precision):
@@ -126,9 +124,10 @@ def run(cfg: dict) -> None:
                 loss = criterion(out.prediction, out.target)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            lr, wd = scheduler.step(step - 1)
+            lr, wd = scheduler.step(step)
             nn.utils.clip_grad_norm_(model.parameters(), cfg["optimizer"]["clip_grad"])
             optimizer.step()
+            step += 1
 
             loss_value = float(loss.item())
             should_checkpoint = step % checkpoint_interval == 0 or step >= max_steps

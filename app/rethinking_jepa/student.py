@@ -105,6 +105,14 @@ def run(cfg: dict) -> None:
     except TypeError:
         steps_per_epoch = None
 
+    print(
+        "student training start "
+        f"device={device} device_batch_size={device_batch_size} "
+        f"effective_batch_size={effective_batch_size} "
+        f"steps_per_epoch={steps_per_epoch if steps_per_epoch is not None else 'unknown'} "
+        f"max_steps={max_steps} precision={precision}"
+    )
+
     student.train()
     best_loss = float("inf")
     epoch = 0
@@ -116,7 +124,6 @@ def run(cfg: dict) -> None:
         for epoch_step, video in enumerate(loader, start=1):
             saw_batch = True
             last_epoch_step = epoch_step
-            step += 1
             video = video.to(device, non_blocking=(device.type == "cuda"))
             mask = sample_mask_from_model(student.student.patch_embed, video, cfg, device)
             with _autocast_context(device, precision):
@@ -124,9 +131,10 @@ def run(cfg: dict) -> None:
                 loss = criterion(out.prediction, out.target)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            lr, wd = scheduler.step(step - 1)
+            lr, wd = scheduler.step(step)
             nn.utils.clip_grad_norm_(student.parameters(), cfg["optimizer"]["clip_grad"])
             optimizer.step()
+            step += 1
 
             loss_value = float(loss.item())
             should_checkpoint = step % checkpoint_interval == 0 or step >= max_steps
