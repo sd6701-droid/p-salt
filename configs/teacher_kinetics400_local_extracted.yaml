@@ -33,7 +33,7 @@ optimizer:
   start_weight_decay: 0.04
   end_weight_decay: 0.4
   clip_grad: 0.02
-  warmup_steps: 10000
+  warmup_steps: 500
   betas: [0.9, 0.95]
 
 wandb:
@@ -53,5 +53,5 @@ train:
   log_interval: 10
   precision: bf16
   steps_per_epoch_scale: 1
-  max_steps: 1000
+  max_steps: 5000
   checkpoint_path: results/checkpoints/teacher_vit_base_kinetics400_local_extracted.pt
