@@ -14,7 +14,7 @@
 set -euo pipefail
 
 WORKDIR=/scratch/sd6701/salt/p-salt
-MANIFEST=/scratch/sd6701/salt/p-salt/data/kinetics400_subset/manifest.txt
+TRAIN_ROOT=/scratch/sd6701/salt/p-salt/data/kinetics400_subset/videos/kinetics_256/train_256
 
 source /scratch/sd6701/miniconda3/etc/profile.d/conda.sh
 conda activate salt
@@ -23,8 +23,8 @@ export LD_LIBRARY_PATH=/scratch/sd6701/miniconda3/envs/salt/lib:${LD_LIBRARY_PAT
 
 mkdir -p "${WORKDIR}/logs"
 
-if [[ ! -f "${MANIFEST}" ]]; then
-  echo "expected manifest not found: ${MANIFEST}" >&2
+if [[ ! -d "${TRAIN_ROOT}" ]]; then
+  echo "expected extracted train root not found: ${TRAIN_ROOT}" >&2
   echo "run Stage 0 extraction first or submit via submit_extract_then_teacher.sh" >&2
   exit 1
 fi
