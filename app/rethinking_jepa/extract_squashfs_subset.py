@@ -107,6 +107,8 @@ def run(cfg: dict) -> None:
         class_fraction=data_cfg.get("class_fraction"),
         max_samples_per_class=max_samples_per_class,
         cache_dir=None,
+        unsquashfs_path=data_cfg.get("unsquashfs_path"),
+        sqfscat_path=data_cfg.get("sqfscat_path"),
     )
 
     videos_dir.mkdir(parents=True, exist_ok=True)

@@ -18,9 +18,20 @@ conda activate salt
 
 export LD_LIBRARY_PATH=/scratch/sd6701/miniconda3/envs/salt/lib:${LD_LIBRARY_PATH:-}
 
+if [ -f /etc/profile.d/modules.sh ]; then
+  source /etc/profile.d/modules.sh
+fi
+
+if command -v module >/dev/null 2>&1; then
+  module load squashfs-tools 2>/dev/null || module load squashfs 2>/dev/null || true
+fi
+
 mkdir -p "${WORKDIR}/logs"
 mkdir -p "${WORKDIR}/data/kinetics400_subset"
 
 cd "${WORKDIR}"
+
+echo "unsquashfs path: $(command -v unsquashfs || echo not-found)"
+echo "sqfscat path: $(command -v sqfscat || echo not-found)"
 
 python3 app/main.py --config configs/extract_kinetics400_local_sqf.yaml

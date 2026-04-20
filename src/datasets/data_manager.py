@@ -104,6 +104,8 @@ def build_video_dataset(cfg: dict[str, Any]) -> Dataset[torch.Tensor]:
                 class_fraction=data_cfg.get("class_fraction"),
                 max_samples_per_class=data_cfg.get("max_samples_per_class"),
                 cache_dir=data_cfg.get("cache_dir"),
+                unsquashfs_path=data_cfg.get("unsquashfs_path"),
+                sqfscat_path=data_cfg.get("sqfscat_path"),
                 **common_kwargs,
             )
         video_paths = _collect_video_paths(data_cfg)
@@ -123,6 +125,8 @@ def build_video_dataset(cfg: dict[str, Any]) -> Dataset[torch.Tensor]:
             class_fraction=data_cfg.get("class_fraction"),
             max_samples_per_class=data_cfg.get("max_samples_per_class"),
             cache_dir=data_cfg.get("cache_dir"),
+            unsquashfs_path=data_cfg.get("unsquashfs_path"),
+            sqfscat_path=data_cfg.get("sqfscat_path"),
             **common_kwargs,
         )
 

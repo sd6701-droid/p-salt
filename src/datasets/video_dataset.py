@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import random
 import shutil
 import subprocess
@@ -18,6 +19,42 @@ from torch.utils.data import Dataset, IterableDataset
 DEFAULT_KINETICS700_TRAIN_ANNOTATION_URL = "https://s3.amazonaws.com/kinetics/700_2020/annotations/train.csv"
 VIDEO_FILE_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm")
 SQUASHFS_FILE_EXTENSIONS = (".sqf", ".sqfs", ".squashfs")
+
+
+def _resolve_squashfs_tool(tool_name: str, explicit_path: str | Path | None = None) -> str | None:
+    candidates: list[Path | str] = []
+    env_name = f"{tool_name.upper()}_BIN"
+
+    if explicit_path is not None:
+        candidates.append(Path(explicit_path).expanduser())
+
+    env_path = os.environ.get(env_name)
+    if env_path:
+        candidates.append(Path(env_path).expanduser())
+
+    tools_dir = os.environ.get("SQUASHFS_TOOLS_DIR")
+    if tools_dir:
+        candidates.append(Path(tools_dir).expanduser() / tool_name)
+
+    for candidate in candidates:
+        path = Path(candidate).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path.resolve())
+
+    resolved = shutil.which(tool_name)
+    if resolved:
+        return resolved
+
+    for candidate in (
+        Path("/usr/bin") / tool_name,
+        Path("/usr/sbin") / tool_name,
+        Path("/usr/local/bin") / tool_name,
+        Path("/opt/homebrew/bin") / tool_name,
+    ):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate.resolve())
+
+    return None
 
 
 @dataclass
@@ -206,6 +243,8 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
         class_fraction: float | None = None,
         max_samples_per_class: int | None = None,
         cache_dir: str | Path | None = None,
+        unsquashfs_path: str | Path | None = None,
+        sqfscat_path: str | Path | None = None,
     ) -> None:
         archive = Path(archive_path).expanduser()
         if archive.suffix.lower() not in SQUASHFS_FILE_EXTENSIONS:
@@ -227,6 +266,8 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
             int(max_samples_per_class) if max_samples_per_class is not None else None
         )
         self.cache_dir = Path(cache_dir).expanduser().resolve() if cache_dir is not None else None
+        self.unsquashfs_path = _resolve_squashfs_tool("unsquashfs", unsquashfs_path)
+        self.sqfscat_path = _resolve_squashfs_tool("sqfscat", sqfscat_path)
         if self.cache_dir is not None:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -250,18 +291,20 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
             self.archive_entries = archive_entries[: int(max_samples)]
 
     def _list_video_entries(self) -> list[str]:
+        if self.unsquashfs_path is None:
+            raise RuntimeError(
+                "Listing videos inside a SquashFS archive requires 'unsquashfs'. "
+                "Install or load squashfs-tools, set UNSQUASHFS_BIN=/full/path/to/unsquashfs, "
+                "or set data.unsquashfs_path in the config."
+            )
+
         try:
             result = subprocess.run(
-                ["unsquashfs", "-no-progress", "-d", "", "-lc", str(self.archive_path)],
+                [self.unsquashfs_path, "-no-progress", "-d", "", "-lc", str(self.archive_path)],
                 check=True,
                 capture_output=True,
                 text=True,
             )
-        except FileNotFoundError as exc:
-            raise RuntimeError(
-                "Listing videos inside a SquashFS archive requires the 'unsquashfs' command "
-                "from squashfs-tools to be available on PATH."
-            ) from exc
         except subprocess.CalledProcessError as exc:
             stderr = exc.stderr.strip()
             raise RuntimeError(
@@ -349,14 +392,13 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
                 return cached_path
             cached_path.parent.mkdir(parents=True, exist_ok=True)
 
-        sqfscat = shutil.which("sqfscat")
-        if sqfscat is not None:
+        if self.sqfscat_path is not None:
             target_path = cached_path if cached_path is not None else output_dir / (Path(entry).name or "video.mp4")
             temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
             try:
                 with temp_path.open("wb") as handle:
                     subprocess.run(
-                        [sqfscat, str(self.archive_path), entry],
+                        [self.sqfscat_path, str(self.archive_path), entry],
                         check=True,
                         stdout=handle,
                         stderr=subprocess.PIPE,
@@ -371,17 +413,17 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
             temp_path.replace(target_path)
             return target_path
 
-        unsquashfs = shutil.which("unsquashfs")
-        if unsquashfs is None:
+        if self.unsquashfs_path is None:
             raise RuntimeError(
                 "Reading videos from a SquashFS archive requires either 'sqfscat' or "
-                "'unsquashfs' from squashfs-tools to be available on PATH."
+                "'unsquashfs'. Install or load squashfs-tools, set SQFSCAT_BIN/UNSQUASHFS_BIN, "
+                "or set data.sqfscat_path/data.unsquashfs_path in the config."
             )
 
         try:
             subprocess.run(
                 [
-                    unsquashfs,
+                    self.unsquashfs_path,
                     "-f",
                     "-no-progress",
                     "-no-xattrs",
@@ -420,6 +462,11 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
         cached_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(fallback), str(cached_path))
         return cached_path
+
+    def extract_entry(self, entry: str, output_dir: str | Path) -> Path:
+        destination_root = Path(output_dir).expanduser().resolve()
+        destination_root.mkdir(parents=True, exist_ok=True)
+        return self._extract_archive_entry(entry, destination_root)
 
     def __getitem__(self, index: int) -> torch.Tensor:
         archive_entry = self.archive_entries[index]
