@@ -4,6 +4,7 @@ import argparse
 import math
 import sys
 import traceback
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -53,9 +54,18 @@ else:
 def _save_checkpoint(model: nn.Module, checkpoint_path: Path, *, label: str, step: int, loss: float) -> None:
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), checkpoint_path)
-    print(
-        f"{label} checkpoint saved step={step} loss={loss:.6f} path={checkpoint_path}"
-    )
+    print(f"{label} checkpoint saved step={step} loss={loss:.6f} path={checkpoint_path}")
+
+
+def _autocast_context(device: torch.device, precision: str):
+    if device.type != "cuda":
+        return nullcontext()
+    precision = precision.lower()
+    if precision == "bf16":
+        return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    if precision == "fp16":
+        return torch.autocast(device_type="cuda", dtype=torch.float16)
+    return nullcontext()
 
 
 def run(cfg: dict) -> None:
@@ -74,6 +84,10 @@ def run(cfg: dict) -> None:
     scheduler = build_scheduler(cfg, optimizer, total_steps=max_steps)
     criterion = nn.MSELoss()
     step = 0
+    checkpoint_interval = int(cfg["train"].get("checkpoint_interval", 100))
+    log_interval = int(cfg["train"].get("log_interval", 10))
+    precision = str(cfg["train"].get("precision", "fp32"))
+
     try:
         steps_per_epoch = len(loader)
     except TypeError:
@@ -87,7 +101,8 @@ def run(cfg: dict) -> None:
         f"effective_batch_size={effective_batch_size} "
         f"steps_per_epoch={steps_per_epoch if steps_per_epoch is not None else 'unknown'} "
         f"max_steps={max_steps} "
-        f"target_epochs={target_epochs if target_epochs is not None else 'unknown'}"
+        f"target_epochs={target_epochs if target_epochs is not None else 'unknown'} "
+        f"precision={precision}"
     )
     if dataset_size is not None:
         print(f"teacher dataset_size={dataset_size}")
@@ -104,31 +119,39 @@ def run(cfg: dict) -> None:
             saw_batch = True
             last_epoch_step = epoch_step
             step += 1
-            video = video.to(device)
+            video = video.to(device, non_blocking=(device.type == "cuda"))
             mask = sample_mask_from_model(model.encoder.patch_embed, video, cfg, device)
-            out = model(video, mask)
-            loss = criterion(out.prediction, out.target)
+            with _autocast_context(device, precision):
+                out = model(video, mask)
+                loss = criterion(out.prediction, out.target)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             lr, wd = scheduler.step(step - 1)
             nn.utils.clip_grad_norm_(model.parameters(), cfg["optimizer"]["clip_grad"])
             optimizer.step()
+
             loss_value = float(loss.item())
-            _save_checkpoint(model, last_checkpoint_path, label="last", step=step, loss=loss_value)
+            should_checkpoint = step % checkpoint_interval == 0 or step >= max_steps
+            if should_checkpoint:
+                _save_checkpoint(model, last_checkpoint_path, label="last", step=step, loss=loss_value)
             if loss_value < best_loss:
                 best_loss = loss_value
-                _save_checkpoint(model, best_checkpoint_path, label="best", step=step, loss=loss_value)
-            if steps_per_epoch is not None:
-                print(
-                    f"teacher step={step}/{max_steps} epoch={epoch} "
-                    f"epoch_step={epoch_step}/{steps_per_epoch} loss={loss_value:.6f} "
-                    f"lr={lr:.7f} wd={wd:.4f}"
-                )
-            else:
-                print(
-                    f"teacher step={step}/{max_steps} epoch={epoch} "
-                    f"loss={loss_value:.6f} lr={lr:.7f} wd={wd:.4f}"
-                )
+                if should_checkpoint:
+                    _save_checkpoint(model, best_checkpoint_path, label="best", step=step, loss=loss_value)
+
+            if step % log_interval == 0 or step == 1 or step >= max_steps:
+                if steps_per_epoch is not None:
+                    print(
+                        f"teacher step={step}/{max_steps} epoch={epoch} "
+                        f"epoch_step={epoch_step}/{steps_per_epoch} loss={loss_value:.6f} "
+                        f"lr={lr:.7f} wd={wd:.4f}"
+                    )
+                else:
+                    print(
+                        f"teacher step={step}/{max_steps} epoch={epoch} "
+                        f"loss={loss_value:.6f} lr={lr:.7f} wd={wd:.4f}"
+                    )
+
             log_wandb_metrics(
                 wandb_run,
                 {
@@ -152,6 +175,9 @@ def run(cfg: dict) -> None:
             print(f"teacher epoch={epoch} complete step={step}")
         else:
             print(f"teacher epoch={epoch} stopped step={step}")
+
+    _save_checkpoint(model, last_checkpoint_path, label="last-final", step=step, loss=loss_value)
+    _save_checkpoint(model, best_checkpoint_path, label="best-final", step=step, loss=best_loss)
 
     finish_wandb_run(
         wandb_run,

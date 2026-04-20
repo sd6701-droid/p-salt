@@ -1,5 +1,4 @@
 from .data_manager import build_video_dataset
-from .image_folder_repeated_frame import ImageFolderRepeatedFrameDataset
 from .imagenet_related_classes import (
     KINETICS_TO_IMAGENET_RELATED_LABELS,
     related_imagenet_labels_for_actions,
@@ -14,6 +13,11 @@ from .video_dataset import (
     VideoFileDataset,
     random_resized_crop_video,
 )
+
+try:
+    from .image_folder_repeated_frame import ImageFolderRepeatedFrameDataset
+except Exception:  # pragma: no cover - optional torchvision dependency
+    ImageFolderRepeatedFrameDataset = None
 
 __all__ = [
     "HuggingFaceVideoDataset",

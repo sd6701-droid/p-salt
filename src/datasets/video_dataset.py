@@ -205,6 +205,7 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
         class_names: list[str] | None = None,
         class_fraction: float | None = None,
         max_samples_per_class: int | None = None,
+        cache_dir: str | Path | None = None,
     ) -> None:
         archive = Path(archive_path).expanduser()
         if archive.suffix.lower() not in SQUASHFS_FILE_EXTENSIONS:
@@ -225,6 +226,9 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
         self.max_samples_per_class = (
             int(max_samples_per_class) if max_samples_per_class is not None else None
         )
+        self.cache_dir = Path(cache_dir).expanduser().resolve() if cache_dir is not None else None
+        if self.cache_dir is not None:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.archive_entries = self._list_video_entries()
         if not self.archive_entries:
@@ -338,9 +342,17 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
         return video.permute(3, 0, 1, 2).contiguous()
 
     def _extract_archive_entry(self, entry: str, output_dir: Path) -> Path:
+        cached_path: Path | None = None
+        if self.cache_dir is not None:
+            cached_path = self.cache_dir / entry
+            if cached_path.exists():
+                return cached_path
+            cached_path.parent.mkdir(parents=True, exist_ok=True)
+
         sqfscat = shutil.which("sqfscat")
         if sqfscat is not None:
-            temp_path = output_dir / (Path(entry).name or "video.mp4")
+            target_path = cached_path if cached_path is not None else output_dir / (Path(entry).name or "video.mp4")
+            temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
             try:
                 with temp_path.open("wb") as handle:
                     subprocess.run(
@@ -356,7 +368,8 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
                     f"Failed to extract '{entry}' from SquashFS archive '{self.archive_path}': "
                     f"{stderr or exc}"
                 ) from exc
-            return temp_path
+            temp_path.replace(target_path)
+            return target_path
 
         unsquashfs = shutil.which("unsquashfs")
         if unsquashfs is None:
@@ -390,7 +403,11 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
 
         extracted_path = output_dir / entry
         if extracted_path.exists():
-            return extracted_path
+            if cached_path is None:
+                return extracted_path
+            cached_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(extracted_path), str(cached_path))
+            return cached_path
 
         fallback = next(output_dir.rglob(Path(entry).name), None)
         if fallback is None:
@@ -398,13 +415,21 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
                 f"Extracted '{entry}' from '{self.archive_path}', but could not find the output file "
                 f"under '{output_dir}'."
             )
-        return fallback
+        if cached_path is None:
+            return fallback
+        cached_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(fallback), str(cached_path))
+        return cached_path
 
     def __getitem__(self, index: int) -> torch.Tensor:
         archive_entry = self.archive_entries[index]
-        with tempfile.TemporaryDirectory() as temp_dir:
-            extracted_path = self._extract_archive_entry(archive_entry, Path(temp_dir))
+        if self.cache_dir is not None:
+            extracted_path = self._extract_archive_entry(archive_entry, self.cache_dir)
             video = _read_video_frames(extracted_path)
+        else:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                extracted_path = self._extract_archive_entry(archive_entry, Path(temp_dir))
+                video = _read_video_frames(extracted_path)
         clip = self._sample_clip(video)
         if self.augmentation is not None:
             clip = random_resized_crop_video(clip, self.augmentation)
