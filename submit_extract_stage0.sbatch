@@ -27,7 +27,7 @@ if command -v module >/dev/null 2>&1; then
 fi
 
 mkdir -p "${WORKDIR}/logs"
-mkdir -p "${WORKDIR}/data/kinetics400_subset"
+mkdir -p "${WORKDIR}/data/kinetics400_subset_2"
 
 cd "${WORKDIR}"
 

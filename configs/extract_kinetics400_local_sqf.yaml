@@ -5,8 +5,8 @@ data:
   # Optional if squashfs-tools is not on PATH.
   # unsquashfs_path: /usr/bin/unsquashfs
   # sqfscat_path: /usr/bin/sqfscat
-  output_dir: /scratch/sd6701/salt/p-salt/data/kinetics400_subset
-  manifest_path: /scratch/sd6701/salt/p-salt/data/kinetics400_subset/manifest.txt
+  output_dir: /scratch/sd6701/salt/p-salt/data/kinetics400_subset_2
+  manifest_path: /scratch/sd6701/salt/p-salt/data/kinetics400_subset_2/manifest.txt
   # Extract a subset of 25 classes and keep all videos from each selected class.
   num_classes: 25
   class_seed: 0

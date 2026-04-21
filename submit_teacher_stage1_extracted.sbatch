@@ -14,7 +14,7 @@
 set -euo pipefail
 
 WORKDIR=/scratch/sd6701/salt/p-salt
-TRAIN_ROOT=/scratch/sd6701/salt/p-salt/data/kinetics400_subset/videos/kinetics_256/train_256
+TRAIN_ROOT=/scratch/sd6701/salt/p-salt/data/kinetics400_subset_2/videos/kinetics_256/train_256
 
 source /scratch/sd6701/miniconda3/etc/profile.d/conda.sh
 conda activate salt

@@ -2,7 +2,7 @@ app: rethinking_jepa.student
 
 data:
   source: real
-  root: /scratch/sd6701/salt/p-salt/data/kinetics400_subset/videos/kinetics_256/train_256
+  root: /scratch/sd6701/salt/p-salt/data/kinetics400_subset_2/videos/kinetics_256/train_256
   max_samples: 500
   sample_seed: 0
   frames: 16
@@ -47,7 +47,7 @@ wandb:
   enabled: true
   project: rethinking-jepa
   fallback_to_offline: true
-  name: student-vit-base-kinetics400-local-extracted
+  name: student-vit-base-kinetics400-local-extracted-subset2
   tags: [student, kinetics400, local, extracted, vit-base]
 
 train:
@@ -59,5 +59,5 @@ train:
   precision: bf16
   steps_per_epoch_scale: 1
   max_steps: 5
-  teacher_checkpoint: results/checkpoints/teacher_vit_base_kinetics400_local_extracted.pt
-  checkpoint_path: results/checkpoints/student_vit_base_kinetics400_local_extracted.pt
+  teacher_checkpoint: results/checkpoints/teacher_vit_base_kinetics400_local_extracted_subset2.pt
+  checkpoint_path: results/checkpoints/student_vit_base_kinetics400_local_extracted_subset2.pt
