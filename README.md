@@ -11,9 +11,10 @@ It follows the paper's high-level recipe:
 
 The configs now include the main Table 5 training values from the paper:
 `16` frames, frame step `4`, input resolution `224`, random resized crop
-augmentation, short/long spatial block masking, cosine learning rate scheduling,
+augmentation, configurable masking strategies, cosine learning rate scheduling,
 warmup, AdamW betas `(0.9, 0.95)`, gradient clipping, and scheduled weight
-decay.
+decay. The active teacher and student configs currently use random token
+masking with a `0.75` mask ratio.
 
 The implementation is intentionally small, but the repository now mirrors the
 same high-level folder layout used by `facebookresearch/vjepa2`: `app/` for

@@ -15,6 +15,8 @@ augmentation:
   random_resize_scale: [0.3, 1.0]
 
 masking:
+  strategy: random
+  random_mask_ratio: 0.75
   short_spatial_mask_scale: 0.15
   long_spatial_mask_scale: 0.7
   temporal_mask_scale: 1.0

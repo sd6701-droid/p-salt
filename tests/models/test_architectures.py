@@ -4,13 +4,13 @@ import argparse
 
 import torch
 
+from app.rethinking_jepa.utils import sample_mask_from_model
 from rethinking_jepa import (
     StudentModel,
     TeacherModel,
     VIT_ARCHITECTURES,
     load_config,
     resolve_model_config,
-    sample_multi_block_mask,
 )
 
 
@@ -61,17 +61,7 @@ def main() -> None:
         video = torch.randn(1, in_channels, frames, size, size, device=device)
         with torch.no_grad():
             _, grid = teacher.encoder.patch_embed(video)
-            mask = sample_multi_block_mask(
-                batch_size=1,
-                grid_t=grid[0],
-                grid_h=grid[1],
-                grid_w=grid[2],
-                short_spatial_mask_scale=cfg["masking"]["short_spatial_mask_scale"],
-                long_spatial_mask_scale=cfg["masking"]["long_spatial_mask_scale"],
-                temporal_scale=cfg["masking"]["temporal_mask_scale"],
-                aspect_ratio_range=tuple(cfg["masking"]["mask_aspect_ratio"]),
-                device=device,
-            )
+            mask = sample_mask_from_model(teacher.encoder.patch_embed, video, cfg, device)
             teacher_out = teacher(video, mask)
             student_out = student(video, mask)
 
