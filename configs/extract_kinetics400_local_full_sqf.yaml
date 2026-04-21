@@ -1,0 +1,17 @@
+app: rethinking_jepa.extract_squashfs_subset
+
+data:
+  archive_path: /projects/work/public/ml-datasets/kinetics/kinetics-400-res256.sqf
+  # Optional if squashfs-tools is not on PATH.
+  # unsquashfs_path: /usr/bin/unsquashfs
+  # sqfscat_path: /usr/bin/sqfscat
+  output_dir: /scratch/sd6701/salt/p-salt/data/kinetics400
+  manifest_path: /scratch/sd6701/salt/p-salt/data/kinetics400/manifest.txt
+  # Omit class_names, max_samples, and max_samples_per_class to extract the
+  # full archive rather than a sampled subset.
+  sample_seed: 0
+  progress_interval: 500
+  channels: 3
+  frames: 16
+  frame_step: 4
+  image_size: 224
