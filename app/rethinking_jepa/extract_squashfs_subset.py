@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 import time
 from collections import Counter
@@ -57,6 +58,27 @@ def _infer_split_name(path: Path) -> str:
         if part in KNOWN_DATASET_SPLITS:
             return part
     return "unknown"
+
+
+def _class_name_from_entry(entry: str) -> str:
+    parent = Path(entry).parent.name
+    if not parent:
+        raise ValueError(f"Could not infer class name from archive entry '{entry}'")
+    return parent
+
+
+def _sample_class_names(entries: list[str], num_classes: int, class_seed: int) -> list[str]:
+    if num_classes <= 0:
+        raise ValueError(f"num_classes must be positive, got {num_classes}")
+
+    available_classes = sorted({_class_name_from_entry(entry) for entry in entries})
+    if num_classes > len(available_classes):
+        raise ValueError(
+            f"Requested num_classes={num_classes}, but archive only has {len(available_classes)} classes"
+        )
+
+    rng = random.Random(class_seed)
+    return sorted(rng.sample(available_classes, num_classes))
 
 
 def _write_split_manifests(output_dir: Path, video_paths: list[Path]) -> dict[str, str]:
@@ -127,30 +149,60 @@ def run(cfg: dict) -> None:
     ).expanduser().resolve()
     sample_seed = int(data_cfg.get("sample_seed", 0))
     class_names = data_cfg.get("class_names")
+    num_classes = data_cfg.get("num_classes")
+    class_seed = int(data_cfg.get("class_seed", sample_seed))
     max_samples = data_cfg.get("max_samples")
     max_samples_per_class = data_cfg.get("max_samples_per_class")
     progress_interval = int(data_cfg.get("progress_interval", 25))
 
+    if class_names is not None and num_classes is not None:
+        raise ValueError("Specify either data.class_names or data.num_classes, not both")
+
+    dataset_kwargs = {
+        "archive_path": archive_path,
+        "channels": int(data_cfg.get("channels", 3)),
+        "frames": int(data_cfg.get("frames", 16)),
+        "frame_step": int(data_cfg.get("frame_step", 4)),
+        "image_size": int(data_cfg.get("image_size", 224)),
+        "augmentation": None,
+        "sample_seed": sample_seed,
+        "class_fraction": data_cfg.get("class_fraction"),
+        "cache_dir": None,
+        "unsquashfs_path": data_cfg.get("unsquashfs_path"),
+        "sqfscat_path": data_cfg.get("sqfscat_path"),
+    }
+
+    if num_classes is not None:
+        unfiltered_dataset = SquashFSVideoDataset(
+            **dataset_kwargs,
+            max_samples=None,
+            class_names=None,
+            max_samples_per_class=None,
+        )
+        class_names = _sample_class_names(
+            unfiltered_dataset.archive_entries,
+            num_classes=int(num_classes),
+            class_seed=class_seed,
+        )
+        print(
+            f"selected {len(class_names)} classes using class_seed={class_seed}: "
+            + ", ".join(class_names)
+        )
+
     dataset = SquashFSVideoDataset(
-        archive_path=archive_path,
-        channels=int(data_cfg.get("channels", 3)),
-        frames=int(data_cfg.get("frames", 16)),
-        frame_step=int(data_cfg.get("frame_step", 4)),
-        image_size=int(data_cfg.get("image_size", 224)),
-        augmentation=None,
+        **dataset_kwargs,
         max_samples=max_samples,
-        sample_seed=sample_seed,
         class_names=class_names,
-        class_fraction=data_cfg.get("class_fraction"),
         max_samples_per_class=max_samples_per_class,
-        cache_dir=None,
-        unsquashfs_path=data_cfg.get("unsquashfs_path"),
-        sqfscat_path=data_cfg.get("sqfscat_path"),
     )
 
     videos_dir.mkdir(parents=True, exist_ok=True)
     total = len(dataset.archive_entries)
-    print(f"extracting {total} videos from {archive_path} to {videos_dir}")
+    selected_class_count = len(class_names) if class_names is not None else "all"
+    print(
+        f"extracting {total} videos from {archive_path} to {videos_dir} "
+        f"class_count={selected_class_count}"
+    )
 
     progress = ExtractionProgress(total=total, progress_interval=progress_interval)
     extract_start = time.monotonic()
@@ -192,6 +244,8 @@ def main(cfg: dict | None = None) -> None:
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--max-samples-per-class", type=int, default=None)
     parser.add_argument("--sample-seed", type=int, default=0)
+    parser.add_argument("--num-classes", type=int, default=None)
+    parser.add_argument("--class-seed", type=int, default=None)
     parser.add_argument("--class-names", nargs="*", default=None)
     parser.add_argument("--progress-interval", type=int, default=25)
     args = parser.parse_args()
@@ -205,6 +259,8 @@ def main(cfg: dict | None = None) -> None:
                 "max_samples": args.max_samples,
                 "max_samples_per_class": args.max_samples_per_class,
                 "sample_seed": args.sample_seed,
+                "num_classes": args.num_classes,
+                "class_seed": args.class_seed,
                 "class_names": args.class_names,
                 "progress_interval": args.progress_interval,
             }

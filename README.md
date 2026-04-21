@@ -48,7 +48,7 @@ python3 test_architectures.py --config configs/teacher_kinetics400_local_extract
 ```
 
 This repository is currently trimmed to the Kinetics-400 extracted-file workflow:
-- Stage 0 extracts the selected subset from squashfs into `/scratch`
+- Stage 0 extracts a configurable subset from squashfs into `/scratch`
 - Stage 1 trains the teacher from the extracted local files
 - Stage 2 trains the student from the same extracted local files
 
@@ -73,6 +73,10 @@ The real-video loader supports:
 - `data.source: real`: read videos from a single `root` directory or `manifest`
 - manifest files in `.txt` format (one path per line) or `.csv` format with a `path` column
 - optional `max_samples` and `sample_seed` to train on a partial subset of a larger dataset
+
+The stage-0 squashfs extractor supports either an explicit `data.class_names`
+list or `data.num_classes` to sample that many classes from the archive and
+extract all videos from each selected class.
 
 ## Notes
 

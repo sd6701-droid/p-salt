@@ -7,13 +7,9 @@ data:
   # sqfscat_path: /usr/bin/sqfscat
   output_dir: /scratch/sd6701/salt/p-salt/data/kinetics400_subset
   manifest_path: /scratch/sd6701/salt/p-salt/data/kinetics400_subset/manifest.txt
-  class_names:
-    - abseiling
-    - air_drumming
-    - applauding
-    - archery
-    - arm_wrestling
-  max_samples_per_class: 100
+  # Extract a subset of 25 classes and keep all videos from each selected class.
+  num_classes: 25
+  class_seed: 0
   sample_seed: 0
   progress_interval: 25
   channels: 3

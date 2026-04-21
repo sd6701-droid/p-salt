@@ -4,7 +4,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
-#SBATCH --time=02:00:00
+#SBATCH --time=08:00:00
 #SBATCH --account=torch_pr_230_tandon_priority
 #SBATCH --output=/scratch/sd6701/salt/p-salt/logs/extract_%j.log
 #SBATCH --error=/scratch/sd6701/salt/p-salt/logs/extract_%j.err
