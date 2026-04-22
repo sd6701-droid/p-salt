@@ -23,7 +23,7 @@ masking:
   mask_aspect_ratio: [0.75, 1.5]
 
 model:
-  architecture: vit_base
+  architecture: vit_h
   in_channels: 3
   tubelet_size: 2
   patch_size: 16
@@ -44,8 +44,8 @@ wandb:
   mode: online
   init_timeout: 180
   fallback_to_offline: true
-  name: teacher-vit-base-kinetics400-local-extracted-subset2
-  tags: [teacher, kinetics400, local, extracted, vit-base]
+  name: teacher-vit-h-kinetics400-local-extracted-subset2
+  tags: [teacher, kinetics400, local, extracted, vit-h]
 
 train:
   device_batch_size: 16
@@ -53,7 +53,9 @@ train:
   prefetch_factor: 6
   checkpoint_interval: 100
   log_interval: 10
+  debug_steps: 5
+  debug_log_max_paths: 16
   precision: bf16
   steps_per_epoch_scale: 1
   max_steps: 5000
-  checkpoint_path: results/checkpoints/teacher_vit_base_kinetics400_local_extracted_subset2.pt
+  checkpoint_path: results/checkpoints/teacher_vit_h_kinetics400_local_extracted_subset2.pt

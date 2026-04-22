@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 import traceback
 from contextlib import nullcontext
@@ -18,8 +19,10 @@ if __package__ in (None, ""):
         build_teacher_from_cfg,
         resolve_device,
         resolve_batch_settings,
+        resolve_dataset_size,
         resolve_max_steps,
         sample_mask_from_model,
+        unpack_video_batch,
     )
     from src.utils import (
         checkpoint_paths,
@@ -37,8 +40,10 @@ else:
         build_teacher_from_cfg,
         resolve_device,
         resolve_batch_settings,
+        resolve_dataset_size,
         resolve_max_steps,
         sample_mask_from_model,
+        unpack_video_batch,
     )
     from src.utils import (
         checkpoint_paths,
@@ -68,10 +73,52 @@ def _autocast_context(device: torch.device, precision: str):
     return nullcontext()
 
 
+def _log_teacher_debug_batch(
+    *,
+    step: int,
+    max_steps: int,
+    epoch: int,
+    epoch_step: int,
+    video: torch.Tensor,
+    mask: torch.Tensor,
+    batch_sources: list[str],
+    dataset_size: int | None,
+    max_paths: int,
+) -> None:
+    batch_size = int(video.size(0))
+    total_tokens_per_sample = int(mask.size(1))
+    masked_tokens_per_sample = int(mask[0].sum().item())
+    visible_tokens_per_sample = total_tokens_per_sample - masked_tokens_per_sample
+
+    print(
+        "teacher debug "
+        f"pid={os.getpid()} step={step}/{max_steps} epoch={epoch} epoch_step={epoch_step} "
+        f"dataset_size={dataset_size if dataset_size is not None else 'unknown'} "
+        f"batch_size={batch_size} "
+        f"total_tokens_per_sample={total_tokens_per_sample} "
+        f"masked_tokens_per_sample={masked_tokens_per_sample} "
+        f"visible_tokens_per_sample={visible_tokens_per_sample} "
+        f"encoder_visible_tokens_per_batch={visible_tokens_per_sample * batch_size} "
+        f"decoder_query_tokens_per_batch={masked_tokens_per_sample * batch_size} "
+        f"decoder_total_tokens_per_batch={total_tokens_per_sample * batch_size}"
+    )
+    if not batch_sources:
+        return
+
+    print(
+        "teacher debug batch_sources "
+        f"step={step} showing={min(len(batch_sources), max_paths)}/{len(batch_sources)}"
+    )
+    for source_idx, source in enumerate(batch_sources[:max_paths], start=1):
+        print(f"  [{source_idx}] {source}")
+    if len(batch_sources) > max_paths:
+        print(f"  ... {len(batch_sources) - max_paths} more")
+
+
 def run(cfg: dict) -> None:
     device = resolve_device()
     model, _ = build_teacher_from_cfg(cfg, device)
-    loader = build_loader(cfg)
+    loader = build_loader(cfg, include_metadata=True)
     device_batch_size, effective_batch_size = resolve_batch_settings(cfg)
     max_steps = resolve_max_steps(cfg)
     best_checkpoint_path, last_checkpoint_path = checkpoint_paths(cfg)
@@ -87,12 +134,14 @@ def run(cfg: dict) -> None:
     checkpoint_interval = int(cfg["train"].get("checkpoint_interval", 100))
     log_interval = int(cfg["train"].get("log_interval", 10))
     precision = str(cfg["train"].get("precision", "fp32"))
+    debug_steps = int(cfg["train"].get("debug_steps", 0))
+    debug_log_max_paths = int(cfg["train"].get("debug_log_max_paths", device_batch_size))
 
     try:
         steps_per_epoch = len(loader)
     except TypeError:
         steps_per_epoch = None
-    dataset_size = steps_per_epoch * device_batch_size if steps_per_epoch is not None else None
+    dataset_size = resolve_dataset_size(loader)
     target_epochs = math.ceil(max_steps / steps_per_epoch) if steps_per_epoch else None
 
     print(
@@ -102,7 +151,8 @@ def run(cfg: dict) -> None:
         f"steps_per_epoch={steps_per_epoch if steps_per_epoch is not None else 'unknown'} "
         f"max_steps={max_steps} "
         f"target_epochs={target_epochs if target_epochs is not None else 'unknown'} "
-        f"precision={precision}"
+        f"precision={precision} "
+        f"debug_steps={debug_steps}"
     )
     if dataset_size is not None:
         print(f"teacher dataset_size={dataset_size}")
@@ -115,11 +165,23 @@ def run(cfg: dict) -> None:
         epoch += 1
         saw_batch = False
         last_epoch_step = 0
-        for epoch_step, video in enumerate(loader, start=1):
+        for epoch_step, batch in enumerate(loader, start=1):
             saw_batch = True
             last_epoch_step = epoch_step
-            video = video.to(device, non_blocking=(device.type == "cuda"))
+            video, batch_sources = unpack_video_batch(batch, device)
             mask = sample_mask_from_model(model.encoder.patch_embed, video, cfg, device)
+            if step < debug_steps:
+                _log_teacher_debug_batch(
+                    step=step + 1,
+                    max_steps=max_steps,
+                    epoch=epoch,
+                    epoch_step=epoch_step,
+                    video=video,
+                    mask=mask,
+                    batch_sources=batch_sources,
+                    dataset_size=dataset_size,
+                    max_paths=debug_log_max_paths,
+                )
             with _autocast_context(device, precision):
                 out = model(video, mask)
                 loss = criterion(out.prediction, out.target)
@@ -164,6 +226,14 @@ def run(cfg: dict) -> None:
                     "train/weight_decay": float(wd),
                     "train/device_batch_size": device_batch_size,
                     "train/effective_batch_size": effective_batch_size,
+                    "train/batch_size": int(video.size(0)),
+                    "train/dataset_size": int(dataset_size) if dataset_size is not None else 0,
+                    "train/tokens_total_per_sample": int(mask.size(1)),
+                    "train/tokens_masked_per_sample": int(mask[0].sum().item()),
+                    "train/tokens_visible_per_sample": int((~mask[0]).sum().item()),
+                    "train/encoder_visible_tokens_per_batch": int((~mask).sum().item()),
+                    "train/decoder_query_tokens_per_batch": int(mask.sum().item()),
+                    "train/decoder_total_tokens_per_batch": int(mask.numel()),
                 },
             )
             if step >= max_steps:

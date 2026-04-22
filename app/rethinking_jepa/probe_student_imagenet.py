@@ -128,6 +128,23 @@ def _iter_forever(loader: DataLoader):
             yield batch
 
 
+def _sample_path_set(dataset: ImageFolderRepeatedFrameDataset) -> set[str]:
+    return {str(Path(path).expanduser().resolve()) for path, _ in dataset.samples}
+
+
+def _ensure_disjoint_probe_splits(
+    train_dataset: ImageFolderRepeatedFrameDataset,
+    val_dataset: ImageFolderRepeatedFrameDataset,
+) -> None:
+    overlap = sorted(_sample_path_set(train_dataset) & _sample_path_set(val_dataset))
+    if overlap:
+        preview = ", ".join(Path(path).name for path in overlap[:5])
+        raise ValueError(
+            "Probe train and validation datasets overlap. "
+            f"Found {len(overlap)} shared files. Sample overlaps: {preview}"
+        )
+
+
 def _save_probe_visualizations(
     probe: FrozenStudentPixelProbe,
     batch: dict[str, object],
@@ -270,6 +287,7 @@ def run(cfg: dict) -> None:
     batch_size = int(probe_cfg.get("batch_size", 1))
     train_dataset_size = len(train_loader.dataset)
     val_dataset_size = len(val_loader.dataset)
+    _ensure_disjoint_probe_splits(train_loader.dataset, val_loader.dataset)
     steps_per_epoch = math.ceil(train_dataset_size / batch_size)
     epochs = int(probe_cfg.get("epochs", 1))
     max_steps_cfg = probe_cfg.get("max_steps")

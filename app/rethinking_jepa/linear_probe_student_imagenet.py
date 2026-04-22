@@ -89,6 +89,23 @@ def _iter_forever(loader: DataLoader):
             yield batch
 
 
+def _sample_path_set(dataset: ImageFolderRepeatedFrameDataset) -> set[str]:
+    return {str(Path(path).expanduser().resolve()) for path, _ in dataset.samples}
+
+
+def _ensure_disjoint_probe_splits(
+    train_dataset: ImageFolderRepeatedFrameDataset,
+    val_dataset: ImageFolderRepeatedFrameDataset,
+) -> None:
+    overlap = sorted(_sample_path_set(train_dataset) & _sample_path_set(val_dataset))
+    if overlap:
+        preview = ", ".join(Path(path).name for path in overlap[:5])
+        raise ValueError(
+            "Linear probe train and validation datasets overlap. "
+            f"Found {len(overlap)} shared files. Sample overlaps: {preview}"
+        )
+
+
 def _discover_shared_classes(train_root: str | Path, val_root: str | Path) -> list[str]:
     train_root = Path(train_root).expanduser()
     val_root = Path(val_root).expanduser()
@@ -241,6 +258,7 @@ def run(cfg: dict) -> None:
         max_samples=probe_cfg.get("max_val_samples"),
         shuffle=False,
     )
+    _ensure_disjoint_probe_splits(train_dataset, val_dataset)
     if train_dataset.classes != val_dataset.classes:
         raise ValueError("Train and validation class sets differ for the linear probe dataset")
 

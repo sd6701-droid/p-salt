@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from bisect import bisect_right
+from pathlib import Path
+from typing import Any
+
 import torch
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import ConcatDataset, DataLoader, Dataset, IterableDataset
 
 from src.datasets.data_manager import build_video_dataset
 from src.masks.default import sample_token_mask
@@ -20,8 +24,65 @@ def resolve_device() -> torch.device:
     return torch.device("cpu")
 
 
-def build_loader(cfg: dict) -> DataLoader:
+def _sample_source_from_dataset(dataset: Any, index: int) -> str:
+    if isinstance(dataset, ConcatDataset):
+        dataset_idx = bisect_right(dataset.cumulative_sizes, index)
+        previous_size = 0 if dataset_idx == 0 else dataset.cumulative_sizes[dataset_idx - 1]
+        return _sample_source_from_dataset(dataset.datasets[dataset_idx], index - previous_size)
+
+    if hasattr(dataset, "video_paths"):
+        return str(Path(dataset.video_paths[index]).expanduser().resolve())
+
+    if hasattr(dataset, "archive_entries") and hasattr(dataset, "archive_path"):
+        archive_path = Path(dataset.archive_path).expanduser().resolve()
+        return f"{archive_path}::{dataset.archive_entries[index]}"
+
+    if hasattr(dataset, "samples"):
+        sample = dataset.samples[index]
+        if isinstance(sample, tuple) and sample:
+            return str(Path(sample[0]).expanduser().resolve())
+
+    return f"{type(dataset).__name__}:{index}"
+
+
+def _normalize_sample(sample: Any, source: str) -> dict[str, Any]:
+    if isinstance(sample, dict):
+        item = dict(sample)
+        item.setdefault("source", source)
+        return item
+    return {"video": sample, "source": source}
+
+
+class _DatasetWithMetadata(Dataset[dict[str, Any]]):
+    def __init__(self, dataset: Dataset[Any]) -> None:
+        self.dataset = dataset
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        return _normalize_sample(self.dataset[index], _sample_source_from_dataset(self.dataset, index))
+
+
+class _IterableDatasetWithMetadata(IterableDataset[dict[str, Any]]):
+    def __init__(self, dataset: IterableDataset[Any]) -> None:
+        self.dataset = dataset
+
+    def __iter__(self):
+        for index, sample in enumerate(self.dataset):
+            source = sample.get("source") if isinstance(sample, dict) else None
+            if source is None:
+                source = f"{type(self.dataset).__name__}:{index}"
+            yield _normalize_sample(sample, str(source))
+
+
+def build_loader(cfg: dict, *, include_metadata: bool = False) -> DataLoader:
     dataset = build_video_dataset(cfg)
+    if include_metadata:
+        if isinstance(dataset, IterableDataset):
+            dataset = _IterableDatasetWithMetadata(dataset)
+        else:
+            dataset = _DatasetWithMetadata(dataset)
     train_num_workers = int(cfg["train"].get("num_workers", 0))
     loader_kwargs = {
         "batch_size": cfg["train"]["device_batch_size"],
@@ -46,6 +107,34 @@ def resolve_batch_settings(cfg: dict) -> tuple[int, int]:
         raise ValueError(f"train.device_batch_size must be positive, got {device_batch_size}")
     effective_batch_size = device_batch_size
     return device_batch_size, effective_batch_size
+
+
+def resolve_dataset_size(loader: DataLoader) -> int | None:
+    dataset = getattr(loader, "dataset", None)
+    if dataset is None:
+        return None
+    try:
+        return len(dataset)
+    except TypeError:
+        return None
+
+
+def unpack_video_batch(batch: Any, device: torch.device) -> tuple[torch.Tensor, list[str]]:
+    if isinstance(batch, dict):
+        video = batch["video"]
+        sources = batch.get("source", batch.get("path", []))
+    else:
+        video = batch
+        sources = []
+
+    if isinstance(sources, str):
+        source_list = [sources]
+    elif isinstance(sources, (list, tuple)):
+        source_list = [str(source) for source in sources]
+    else:
+        source_list = [] if sources is None else [str(sources)]
+
+    return video.to(device, non_blocking=(device.type == "cuda")), source_list
 
 
 def resolve_max_steps(cfg: dict) -> int:
