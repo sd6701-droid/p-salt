@@ -136,6 +136,7 @@ def run(cfg: dict) -> None:
     precision = str(cfg["train"].get("precision", "fp32"))
     debug_steps = int(cfg["train"].get("debug_steps", 0))
     debug_log_max_paths = int(cfg["train"].get("debug_log_max_paths", device_batch_size))
+    norm_pix_loss = bool(getattr(model, "norm_pix_loss", False))
 
     try:
         steps_per_epoch = len(loader)
@@ -152,7 +153,8 @@ def run(cfg: dict) -> None:
         f"max_steps={max_steps} "
         f"target_epochs={target_epochs if target_epochs is not None else 'unknown'} "
         f"precision={precision} "
-        f"debug_steps={debug_steps}"
+        f"debug_steps={debug_steps} "
+        f"norm_pix_loss={norm_pix_loss}"
     )
     if dataset_size is not None:
         print(f"teacher dataset_size={dataset_size}")
@@ -226,6 +228,7 @@ def run(cfg: dict) -> None:
                     "train/weight_decay": float(wd),
                     "train/device_batch_size": device_batch_size,
                     "train/effective_batch_size": effective_batch_size,
+                    "train/norm_pix_loss": float(norm_pix_loss),
                     "train/batch_size": int(video.size(0)),
                     "train/dataset_size": int(dataset_size) if dataset_size is not None else 0,
                     "train/tokens_total_per_sample": int(mask.size(1)),

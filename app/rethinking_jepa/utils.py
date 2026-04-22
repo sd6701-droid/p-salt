@@ -146,10 +146,13 @@ def resolve_max_steps(cfg: dict) -> int:
 
 def build_teacher_from_cfg(cfg: dict, device: torch.device) -> tuple[TeacherModel, dict]:
     model_cfg = resolve_model_config(cfg["model"])
+    loss_cfg = cfg.get("loss", {})
     teacher = TeacherModel(
         **model_cfg,
         frames=cfg["data"]["frames"],
         image_size=cfg["data"]["input_size"],
+        norm_pix_loss=bool(loss_cfg.get("norm_pix_loss", False)),
+        norm_pix_eps=float(loss_cfg.get("norm_pix_eps", 1.0e-6)),
     ).to(device)
     return teacher, model_cfg
 

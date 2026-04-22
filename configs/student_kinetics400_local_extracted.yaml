@@ -2,7 +2,7 @@ app: rethinking_jepa.student
 
 data:
   source: real
-  root: /scratch/sd6701/salt/p-salt/data/kinetics400_subset_2/videos/kinetics_256/train_256
+  manifest: /scratch/sd6701/salt/p-salt/data/kinetics400_subset_2/train_256_manifest.txt
   max_samples: 500
   sample_seed: 0
   frames: 16
@@ -23,6 +23,12 @@ masking:
   mask_aspect_ratio: [0.75, 1.5]
 
 model:
+  architecture: vit_h
+  in_channels: 3
+  tubelet_size: 2
+  patch_size: 16
+
+student_model:
   architecture: vit_base
   in_channels: 3
   tubelet_size: 2
@@ -61,5 +67,5 @@ train:
   precision: bf16
   steps_per_epoch_scale: 1
   max_steps: 5
-  teacher_checkpoint: results/checkpoints/teacher_vit_base_kinetics400_local_extracted_subset2.pt
+  teacher_checkpoint: results/checkpoints/teacher_vit_h_kinetics400_local_extracted_subset2.pt
   checkpoint_path: results/checkpoints/student_vit_base_kinetics400_local_extracted_subset2.pt

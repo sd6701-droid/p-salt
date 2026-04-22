@@ -50,6 +50,12 @@ def patchify_video(
     return x.view(b, t_grid * h_grid * w_grid, c * tubelet_size * patch_size * patch_size)
 
 
+def normalize_patch_targets(targets: torch.Tensor, eps: float = 1.0e-6) -> torch.Tensor:
+    mean = targets.mean(dim=-1, keepdim=True)
+    var = targets.var(dim=-1, unbiased=False, keepdim=True)
+    return (targets - mean) / torch.sqrt(var + eps)
+
+
 @dataclass
 class ModelOutput:
     prediction: torch.Tensor
@@ -72,6 +78,8 @@ class TeacherModel(nn.Module):
         mlp_ratio: float,
         tubelet_size: int,
         patch_size: int,
+        norm_pix_loss: bool = False,
+        norm_pix_eps: float = 1.0e-6,
     ) -> None:
         super().__init__()
         self.encoder = VideoTransformerEncoder(
@@ -93,6 +101,8 @@ class TeacherModel(nn.Module):
         )
         self.frames = frames
         self.image_size = image_size
+        self.norm_pix_loss = norm_pix_loss
+        self.norm_pix_eps = norm_pix_eps
 
     def forward(self, video: torch.Tensor, mask: torch.Tensor) -> ModelOutput:
         tokens, pos = self.encoder.embed(video)
@@ -108,6 +118,8 @@ class TeacherModel(nn.Module):
             patch_size=self.encoder.patch_size,
         )
         target = _gather_tokens(patches, masked_ids)
+        if self.norm_pix_loss:
+            target = normalize_patch_targets(target, eps=self.norm_pix_eps)
         return ModelOutput(prediction=prediction, target=target, mask=mask)
 
 
