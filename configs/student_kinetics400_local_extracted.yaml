@@ -17,7 +17,7 @@ augmentation:
 
 masking:
   strategy: random
-  random_mask_ratio: 0.75
+  random_mask_ratio: 0.9
   short_spatial_mask_scale: 0.15
   long_spatial_mask_scale: 0.7
   temporal_mask_scale: 1.0
@@ -58,7 +58,7 @@ wandb:
   tags: [student, kinetics400, local, extracted, vit-base]
 
 train:
-  device_batch_size: 8
+  device_batch_size: 16
   num_workers: 12
   prefetch_factor: 6
   checkpoint_interval: 100
@@ -68,4 +68,4 @@ train:
   steps_per_epoch_scale: 1
   max_steps: 10000
   teacher_checkpoint: /scratch/sd6701/salt/p-salt/results/checkpoints/ba0e9395/best/checkpoint.pth
-  checkpoint_path: results/checkpoints/student_vit_base_kinetics400_local_extracted_subset2.pt
+  checkpoint_path: results/checkpoints/student_vit_base_kinetics400_local_extracted_subset2.pth
