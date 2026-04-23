@@ -66,6 +66,6 @@ train:
   debug_steps: 5
   precision: bf16
   steps_per_epoch_scale: 1
-  max_steps: 5
-  teacher_checkpoint: results/checkpoints/teacher_vit_small_kinetics400_local_extracted_subset2.pt
+  max_steps: 10000
+  teacher_checkpoint: /scratch/sd6701/salt/p-salt/results/checkpoints/ba0e9395/best/checkpoint.pth
   checkpoint_path: results/checkpoints/student_vit_small_kinetics400_local_extracted_subset2.pt
