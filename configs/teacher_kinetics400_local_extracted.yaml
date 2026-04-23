@@ -28,7 +28,7 @@ loss:
   norm_pix_eps: 1.0e-6
 
 model:
-  architecture: vit_h
+  architecture: vit_small
   in_channels: 3
   tubelet_size: 2
   patch_size: 16
@@ -49,8 +49,8 @@ wandb:
   mode: online
   init_timeout: 180
   fallback_to_offline: true
-  name: teacher-vit-h-kinetics400-local-extracted-subset2
-  tags: [teacher, kinetics400, local, extracted, vit-h]
+  name: teacher-vit-small-kinetics400-local-extracted-subset2
+  tags: [teacher, kinetics400, local, extracted, vit-small]
 
 train:
   device_batch_size: 16
@@ -62,4 +62,4 @@ train:
   precision: bf16
   steps_per_epoch_scale: 1
   max_steps: 2000
-  checkpoint_path: results/checkpoints/teacher_vit_h_kinetics400_local_extracted_subset2.pt
+  checkpoint_path: results/checkpoints/teacher_vit_small_kinetics400_local_extracted_subset2.pt

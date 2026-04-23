@@ -177,7 +177,7 @@ def run(cfg: dict) -> None:
                 )
             with _autocast_context(device, precision):
                 out = student(video, mask)
-                loss = criterion(out.prediction, out.target)
+            loss = criterion(out.prediction.float(), out.target.float())
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             lr, wd = scheduler.step(step)

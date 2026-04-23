@@ -191,16 +191,18 @@ def run(cfg: dict) -> None:
                 )
             with _autocast_context(device, precision):
                 out = model(video, mask)
-                loss = criterion(out.prediction, out.target)
-            target_mean = float(out.target.mean().item())
-            target_std = float(out.target.std(unbiased=False).item())
-            prediction_mean = float(out.prediction.mean().item())
-            prediction_std = float(out.prediction.std(unbiased=False).item())
+            prediction_for_loss = out.prediction.float()
+            target_for_loss = out.target.float()
+            loss = criterion(prediction_for_loss, target_for_loss)
+            target_mean = float(target_for_loss.mean().item())
+            target_std = float(target_for_loss.std(unbiased=False).item())
+            prediction_mean = float(prediction_for_loss.mean().item())
+            prediction_std = float(prediction_for_loss.std(unbiased=False).item())
             if step < debug_steps:
                 target_mean, target_std, prediction_mean, prediction_std = _log_teacher_prediction_stats(
                     step=step + 1,
-                    prediction=out.prediction,
-                    target=out.target,
+                    prediction=prediction_for_loss,
+                    target=target_for_loss,
                 )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
