@@ -287,6 +287,9 @@ class VideoFileDataset(Dataset[torch.Tensor]):
         frame_step: int,
         image_size: int,
         augmentation: VideoAugmentationConfig | None = None,
+        skip_decode_errors: bool = False,
+        max_decode_attempts: int = 16,
+        log_decode_warnings: bool = True,
     ) -> None:
         if not video_paths:
             raise ValueError("VideoFileDataset requires at least one video path")
@@ -296,6 +299,10 @@ class VideoFileDataset(Dataset[torch.Tensor]):
         self.frame_step = frame_step
         self.image_size = image_size
         self.augmentation = augmentation
+        self.skip_decode_errors = skip_decode_errors
+        self.max_decode_attempts = max(1, int(max_decode_attempts))
+        self.log_decode_warnings = log_decode_warnings
+        self._decode_warning_count = 0
 
     def __len__(self) -> int:
         return len(self.video_paths)
@@ -304,7 +311,7 @@ class VideoFileDataset(Dataset[torch.Tensor]):
         video = video.float() / 255.0
         return video.permute(3, 0, 1, 2).contiguous()
 
-    def __getitem__(self, index: int) -> torch.Tensor:
+    def _load_clip(self, index: int) -> torch.Tensor:
         path = self.video_paths[index]
         sampled_frames = _read_video_clip(path, frames=self.frames, frame_step=self.frame_step)
         clip = self._sample_clip(sampled_frames)
@@ -325,6 +332,41 @@ class VideoFileDataset(Dataset[torch.Tensor]):
                     f"Expected {self.channels} channels but decoded {clip.size(0)} from {path}"
                 )
         return clip
+
+    def _warn_decode_error(self, *, requested_index: int, fallback_index: int, exc: Exception) -> None:
+        if not self.log_decode_warnings:
+            return
+        self._decode_warning_count += 1
+        if self._decode_warning_count > 5 and self._decode_warning_count % 25 != 0:
+            return
+        print(
+            "warning: skipping undecodable local video "
+            f"index={requested_index} fallback_index={fallback_index} "
+            f"error={type(exc).__name__}"
+        )
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        if not self.skip_decode_errors:
+            return self._load_clip(index)
+
+        attempts = min(self.max_decode_attempts, len(self.video_paths))
+        last_error: Exception | None = None
+        for attempt in range(attempts):
+            candidate_index = (index + attempt) % len(self.video_paths)
+            try:
+                return self._load_clip(candidate_index)
+            except Exception as exc:
+                last_error = exc
+                self._warn_decode_error(
+                    requested_index=index,
+                    fallback_index=candidate_index,
+                    exc=exc,
+                )
+
+        raise RuntimeError(
+            "Failed to decode a usable local video clip after "
+            f"{attempts} attempts starting at dataset index {index}."
+        ) from last_error
 
 
 class SquashFSVideoDataset(Dataset[torch.Tensor]):

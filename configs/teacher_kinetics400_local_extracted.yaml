@@ -3,6 +3,9 @@ app: rethinking_jepa.train
 data:
   source: real
   manifest: /scratch/sd6701/salt/p-salt/data/kinetics400_subset_2/train_256_manifest.txt
+  skip_decode_errors: true
+  max_decode_attempts: 32
+  log_decode_warnings: true
   frames: 16
   frame_step: 4
   image_size: 256

@@ -112,6 +112,9 @@ def build_video_dataset(cfg: dict[str, Any]) -> Dataset[torch.Tensor]:
         return VideoFileDataset(
             video_paths=video_paths,
             image_size=data_cfg["image_size"],
+            skip_decode_errors=bool(data_cfg.get("skip_decode_errors", False)),
+            max_decode_attempts=int(data_cfg.get("max_decode_attempts", 16)),
+            log_decode_warnings=bool(data_cfg.get("log_decode_warnings", True)),
             **common_kwargs,
         )
 
@@ -159,6 +162,24 @@ def build_video_dataset(cfg: dict[str, Any]) -> Dataset[torch.Tensor]:
                     VideoFileDataset(
                         video_paths=video_paths,
                         image_size=data_cfg["image_size"],
+                        skip_decode_errors=bool(
+                            dataset_cfg.get(
+                                "skip_decode_errors",
+                                data_cfg.get("skip_decode_errors", False),
+                            )
+                        ),
+                        max_decode_attempts=int(
+                            dataset_cfg.get(
+                                "max_decode_attempts",
+                                data_cfg.get("max_decode_attempts", 16),
+                            )
+                        ),
+                        log_decode_warnings=bool(
+                            dataset_cfg.get(
+                                "log_decode_warnings",
+                                data_cfg.get("log_decode_warnings", True),
+                            )
+                        ),
                         **common_kwargs,
                     )
                 )
