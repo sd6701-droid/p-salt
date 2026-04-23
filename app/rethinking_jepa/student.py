@@ -89,9 +89,7 @@ def _log_student_debug_batch(
     epoch_step: int,
     video: torch.Tensor,
     mask: torch.Tensor,
-    batch_sources: list[str],
     dataset_size: int | None,
-    max_paths: int,
 ) -> None:
     batch_size = int(video.size(0))
     total_tokens_per_sample = int(mask.size(1))
@@ -110,17 +108,6 @@ def _log_student_debug_batch(
         f"student_visible_tokens_per_batch={visible_tokens_per_sample * batch_size} "
         f"predictor_query_tokens_per_batch={masked_tokens_per_sample * batch_size}"
     )
-    if not batch_sources:
-        return
-
-    print(
-        "student debug batch_sources "
-        f"step={step} showing={min(len(batch_sources), max_paths)}/{len(batch_sources)}"
-    )
-    for source_idx, source in enumerate(batch_sources[:max_paths], start=1):
-        print(f"  [{source_idx}] {source}")
-    if len(batch_sources) > max_paths:
-        print(f"  ... {len(batch_sources) - max_paths} more")
 
 
 def run(cfg: dict) -> None:
@@ -129,7 +116,7 @@ def run(cfg: dict) -> None:
     teacher.load_state_dict(torch.load(cfg["train"]["teacher_checkpoint"], map_location=device))
 
     student = build_student_from_cfg(cfg, teacher, device)
-    loader = build_loader(cfg, include_metadata=True)
+    loader = build_loader(cfg)
     device_batch_size, effective_batch_size = resolve_batch_settings(cfg)
     max_steps = resolve_max_steps(cfg)
     best_checkpoint_path, last_checkpoint_path = checkpoint_paths(cfg)
@@ -147,7 +134,6 @@ def run(cfg: dict) -> None:
     log_interval = int(cfg["train"].get("log_interval", 10))
     precision = str(cfg["train"].get("precision", "fp32"))
     debug_steps = int(cfg["train"].get("debug_steps", 0))
-    debug_log_max_paths = int(cfg["train"].get("debug_log_max_paths", device_batch_size))
 
     try:
         steps_per_epoch = len(loader)
@@ -177,7 +163,7 @@ def run(cfg: dict) -> None:
         for epoch_step, batch in enumerate(loader, start=1):
             saw_batch = True
             last_epoch_step = epoch_step
-            video, batch_sources = unpack_video_batch(batch, device)
+            video, _ = unpack_video_batch(batch, device)
             mask = sample_mask_from_model(student.student.patch_embed, video, cfg, device)
             if step < debug_steps:
                 _log_student_debug_batch(
@@ -187,9 +173,7 @@ def run(cfg: dict) -> None:
                     epoch_step=epoch_step,
                     video=video,
                     mask=mask,
-                    batch_sources=batch_sources,
                     dataset_size=dataset_size,
-                    max_paths=debug_log_max_paths,
                 )
             with _autocast_context(device, precision):
                 out = student(video, mask)
