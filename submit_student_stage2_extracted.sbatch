@@ -17,6 +17,8 @@ WORKDIR=/scratch/sd6701/salt/p-salt
 TRAIN_MANIFEST=/scratch/sd6701/salt/p-salt/data/kinetics400_subset_2/train_256_manifest.txt
 TEACHER_CHECKPOINT=/scratch/sd6701/salt/p-salt/results/checkpoints/ba0e9395/best/checkpoint.pth
 
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+
 source /scratch/sd6701/miniconda3/etc/profile.d/conda.sh
 conda activate salt
 

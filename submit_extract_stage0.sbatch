@@ -13,6 +13,8 @@ set -euo pipefail
 
 WORKDIR=/scratch/sd6701/salt/p-salt
 
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+
 source /scratch/sd6701/miniconda3/etc/profile.d/conda.sh
 conda activate salt
 
