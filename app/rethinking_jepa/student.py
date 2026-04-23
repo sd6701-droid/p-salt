@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 if __package__ in (None, ""):
@@ -110,6 +111,47 @@ def _log_student_debug_batch(
     )
 
 
+def _student_prediction_diagnostics(
+    *,
+    prediction: torch.Tensor,
+    target: torch.Tensor,
+) -> dict[str, float]:
+    target_mean = float(target.mean().item())
+    target_std = float(target.std(unbiased=False).item())
+    prediction_mean = float(prediction.mean().item())
+    prediction_std = float(prediction.std(unbiased=False).item())
+    cosine_similarity = float(F.cosine_similarity(prediction, target, dim=-1).mean().item())
+    target_token_norm_mean = float(target.norm(dim=-1).mean().item())
+    prediction_token_norm_mean = float(prediction.norm(dim=-1).mean().item())
+    return {
+        "target_mean": target_mean,
+        "target_std": target_std,
+        "prediction_mean": prediction_mean,
+        "prediction_std": prediction_std,
+        "cosine_similarity": cosine_similarity,
+        "target_token_norm_mean": target_token_norm_mean,
+        "prediction_token_norm_mean": prediction_token_norm_mean,
+    }
+
+
+def _log_student_prediction_diagnostics(
+    *,
+    step: int,
+    diagnostics: dict[str, float],
+) -> None:
+    print(
+        "student prediction stats "
+        f"step={step} "
+        f"targets.mean={diagnostics['target_mean']:.6f} "
+        f"targets.std={diagnostics['target_std']:.6f} "
+        f"targets.token_norm_mean={diagnostics['target_token_norm_mean']:.6f} "
+        f"predictions.mean={diagnostics['prediction_mean']:.6f} "
+        f"predictions.std={diagnostics['prediction_std']:.6f} "
+        f"predictions.token_norm_mean={diagnostics['prediction_token_norm_mean']:.6f} "
+        f"predictions_vs_targets.cos_sim={diagnostics['cosine_similarity']:.6f}"
+    )
+
+
 def run(cfg: dict) -> None:
     device = resolve_device()
     teacher, _ = build_teacher_from_cfg(cfg, device)
@@ -177,7 +219,21 @@ def run(cfg: dict) -> None:
                 )
             with _autocast_context(device, precision):
                 out = student(video, mask)
-            loss = criterion(out.prediction.float(), out.target.float())
+            prediction_for_loss = out.prediction.float()
+            target_for_loss = out.target.float()
+            loss = criterion(prediction_for_loss, target_for_loss)
+            diagnostics = _student_prediction_diagnostics(
+                prediction=prediction_for_loss,
+                target=target_for_loss,
+            )
+            should_log_prediction_diagnostics = (
+                step < debug_steps or (step + 1) % log_interval == 0 or step == 0 or step + 1 >= max_steps
+            )
+            if should_log_prediction_diagnostics:
+                _log_student_prediction_diagnostics(
+                    step=step + 1,
+                    diagnostics=diagnostics,
+                )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             lr, wd = scheduler.step(step)
@@ -239,6 +295,13 @@ def run(cfg: dict) -> None:
                     "train/frozen_teacher_tokens_per_batch": int(mask.numel()),
                     "train/student_visible_tokens_per_batch": int((~mask).sum().item()),
                     "train/predictor_query_tokens_per_batch": int(mask.sum().item()),
+                    "train/targets_mean": diagnostics["target_mean"],
+                    "train/targets_std": diagnostics["target_std"],
+                    "train/targets_token_norm_mean": diagnostics["target_token_norm_mean"],
+                    "train/predictions_mean": diagnostics["prediction_mean"],
+                    "train/predictions_std": diagnostics["prediction_std"],
+                    "train/predictions_token_norm_mean": diagnostics["prediction_token_norm_mean"],
+                    "train/predictions_targets_cosine_similarity": diagnostics["cosine_similarity"],
                 },
             )
             if step >= max_steps:
