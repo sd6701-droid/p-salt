@@ -3,8 +3,6 @@ app: rethinking_jepa.train
 data:
   source: real
   manifest: /scratch/sd6701/salt/p-salt/data/kinetics400_subset_2/train_256_manifest.txt
-  max_samples: 500
-  sample_seed: 0
   frames: 16
   frame_step: 4
   image_size: 256
