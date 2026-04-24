@@ -17,12 +17,11 @@ augmentation:
 
 masking:
   strategy: multiblock3d
-  random_mask_ratio: 0.75
-  short_spatial_mask_scale: 0.5
+  short_spatial_mask_scale: 0.15   # was 0.5
   long_spatial_mask_scale: 0.7
-  temporal_mask_scale: 1.0
+  temporal_mask_scale: 1
   mask_aspect_ratio: [0.75, 1.5]
-
+  
 loss:
   norm_pix_loss: true
   norm_pix_eps: 1.0e-6
