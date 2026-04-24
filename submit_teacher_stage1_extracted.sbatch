@@ -22,6 +22,7 @@ source /scratch/sd6701/miniconda3/etc/profile.d/conda.sh
 conda activate salt
 
 export LD_LIBRARY_PATH=/scratch/sd6701/miniconda3/envs/salt/lib:${LD_LIBRARY_PATH:-}
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 mkdir -p "${WORKDIR}/logs"
 

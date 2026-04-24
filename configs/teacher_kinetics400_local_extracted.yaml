@@ -52,7 +52,7 @@ wandb:
   tags: [teacher, kinetics400, local, extracted, vit-small]
 
 train:
-  device_batch_size: 128
+  device_batch_size: 64
   num_workers: 12
   prefetch_factor: 6
   checkpoint_interval: 100
