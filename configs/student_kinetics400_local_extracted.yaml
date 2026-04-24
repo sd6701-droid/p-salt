@@ -30,15 +30,15 @@ model:
   patch_size: 16
 
 student_model:
-  architecture: vit_base
+  architecture: vit_small
   in_channels: 3
   tubelet_size: 2
   patch_size: 16
 
 student:
-  predictor_dim: 768
+  predictor_dim: 384
   predictor_depth: 4
-  predictor_heads: 12
+  predictor_heads: 6
 
 optimizer:
   start_lr: 0.0001
@@ -54,8 +54,8 @@ wandb:
   enabled: true
   project: rethinking-jepa
   fallback_to_offline: true
-  name: student-vit-base-kinetics400-local-extracted-subset2
-  tags: [student, kinetics400, local, extracted, vit-base]
+  name: student-vit-small-kinetics400-local-extracted-subset2
+  tags: [student, kinetics400, local, extracted, vit-small]
 
 train:
   device_batch_size: 16
@@ -68,4 +68,4 @@ train:
   steps_per_epoch_scale: 1
   max_steps: 10000
   teacher_checkpoint: /scratch/sd6701/salt/p-salt/results/checkpoints/ba0e9395/best/checkpoint.pth
-  checkpoint_path: results/checkpoints/student_vit_base_kinetics400_local_extracted_subset2.pth
+  checkpoint_path: results/checkpoints/student_vit_small_kinetics400_local_extracted_subset2.pth

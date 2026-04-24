@@ -16,9 +16,8 @@ augmentation:
   random_resize_scale: [0.3, 1.0]
 
 masking:
-  strategy: random
-  random_mask_ratio: 0.75
-  short_spatial_mask_scale: 0.5
+  strategy: multiblock3d
+  short_spatial_mask_scale: 0.15
   long_spatial_mask_scale: 0.7
   temporal_mask_scale: 1.0
   mask_aspect_ratio: [0.75, 1.5]
@@ -53,7 +52,7 @@ wandb:
   tags: [teacher, kinetics400, local, extracted, vit-small]
 
 train:
-  device_batch_size: 16
+  device_batch_size: 128
   num_workers: 12
   prefetch_factor: 6
   checkpoint_interval: 100
@@ -61,5 +60,11 @@ train:
   debug_steps: 5
   precision: bf16
   steps_per_epoch_scale: 1
-  max_steps: 10000
+  max_steps: 30000
   checkpoint_path: results/checkpoints/teacher_vit_small_kinetics400_local_extracted_subset2.pt
+
+
+# small batch + very low clip_grad
+# => noisy gradients get clipped hard
+# => updates become tiny
+# => learning slows/collapses
