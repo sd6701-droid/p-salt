@@ -18,10 +18,13 @@ augmentation:
 masking:
   strategy: random
   random_mask_ratio: 0.75
-  short_spatial_mask_scale: 0.5
+  short_spatial_mask_scale: 0.15
   long_spatial_mask_scale: 0.7
   temporal_mask_scale: 1.0
   mask_aspect_ratio: [0.75, 1.5]
+  short_num_blocks: 8
+  long_num_blocks: 2
+  multiblock_profile_sampling: random
 
 loss:
   norm_pix_loss: true

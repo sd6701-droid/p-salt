@@ -248,6 +248,9 @@ def sample_mask_from_model(
             long_spatial_scale=masking_cfg["long_spatial_mask_scale"],
             temporal_scale=masking_cfg["temporal_mask_scale"],
             aspect_ratio_range=tuple(masking_cfg["mask_aspect_ratio"]),
+            short_num_blocks=int(masking_cfg.get("short_num_blocks", 8)),
+            long_num_blocks=int(masking_cfg.get("long_num_blocks", 2)),
+            profile_sampling=str(masking_cfg.get("multiblock_profile_sampling", "random")),
             device=device,
         )
 
