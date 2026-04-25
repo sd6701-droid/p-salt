@@ -99,14 +99,17 @@ def build_loader(cfg: dict, *, include_metadata: bool = False) -> DataLoader:
     )
 
 
-def resolve_batch_settings(cfg: dict) -> tuple[int, int]:
+def resolve_batch_settings(cfg: dict) -> tuple[int, int, int]:
     train_cfg = cfg["train"]
     device_batch_size = int(train_cfg["device_batch_size"])
+    accumulation_steps = int(train_cfg.get("accumulation_steps", 1))
 
     if device_batch_size <= 0:
         raise ValueError(f"train.device_batch_size must be positive, got {device_batch_size}")
-    effective_batch_size = device_batch_size
-    return device_batch_size, effective_batch_size
+    if accumulation_steps <= 0:
+        raise ValueError(f"train.accumulation_steps must be positive, got {accumulation_steps}")
+    effective_batch_size = device_batch_size * accumulation_steps
+    return device_batch_size, accumulation_steps, effective_batch_size
 
 
 def resolve_dataset_size(loader: DataLoader) -> int | None:
@@ -251,6 +254,11 @@ def sample_mask_from_model(
             short_num_blocks=int(masking_cfg.get("short_num_blocks", 8)),
             long_num_blocks=int(masking_cfg.get("long_num_blocks", 2)),
             profile_sampling=str(masking_cfg.get("multiblock_profile_sampling", "random")),
+            target_mask_ratio=(
+                float(masking_cfg["target_mask_ratio"])
+                if masking_cfg.get("target_mask_ratio") is not None
+                else None
+            ),
             device=device,
         )
 

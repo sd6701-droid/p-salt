@@ -24,7 +24,8 @@ masking:
   mask_aspect_ratio: [0.75, 1.5]
   short_num_blocks: 8
   long_num_blocks: 2
-  multiblock_profile_sampling: both
+  target_mask_ratio: 0.85
+  multiblock_profile_sampling: vjepa
 
 loss:
   norm_pix_loss: true
@@ -43,7 +44,7 @@ optimizer:
   start_weight_decay: 0.05
   end_weight_decay: 0.05
   clip_grad: 0.5
-  warmup_steps: 300
+  warmup_steps: 1500
   betas: [0.9, 0.95]
 
 wandb:
@@ -56,7 +57,8 @@ wandb:
   tags: [teacher, kinetics400, local, extracted, vit-small]
 
 train:
-  device_batch_size: 16
+  device_batch_size: 64
+  accumulation_steps: 8
   num_workers: 12
   prefetch_factor: 6
   checkpoint_interval: 100

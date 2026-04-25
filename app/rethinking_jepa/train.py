@@ -107,13 +107,11 @@ def _log_teacher_debug_batch(
 def _log_teacher_prediction_stats(
     *,
     step: int,
-    prediction: torch.Tensor,
-    target: torch.Tensor,
-) -> tuple[float, float, float, float]:
-    target_mean = float(target.mean().item())
-    target_std = float(target.std(unbiased=False).item())
-    prediction_mean = float(prediction.mean().item())
-    prediction_std = float(prediction.std(unbiased=False).item())
+    target_mean: float,
+    target_std: float,
+    prediction_mean: float,
+    prediction_std: float,
+) -> None:
     print(
         "teacher prediction stats "
         f"step={step} "
@@ -122,14 +120,21 @@ def _log_teacher_prediction_stats(
         f"predictions.mean={prediction_mean:.6f} "
         f"predictions.std={prediction_std:.6f}"
     )
-    return target_mean, target_std, prediction_mean, prediction_std
+
+
+def _mean_std_from_sums(sum_value: float, sumsq_value: float, count: int) -> tuple[float, float]:
+    if count <= 0:
+        return 0.0, 0.0
+    mean = sum_value / count
+    variance = max(0.0, (sumsq_value / count) - (mean * mean))
+    return mean, math.sqrt(variance)
 
 
 def run(cfg: dict) -> None:
     device = resolve_device()
     model, _ = build_teacher_from_cfg(cfg, device)
     loader = build_loader(cfg)
-    device_batch_size, effective_batch_size = resolve_batch_settings(cfg)
+    device_batch_size, accumulation_steps, effective_batch_size = resolve_batch_settings(cfg)
     max_steps = resolve_max_steps(cfg)
     best_checkpoint_path, last_checkpoint_path = checkpoint_paths(cfg)
     wandb_run = init_wandb_run(cfg, job_type="teacher-train")
@@ -152,11 +157,12 @@ def run(cfg: dict) -> None:
     except TypeError:
         steps_per_epoch = None
     dataset_size = resolve_dataset_size(loader)
-    target_epochs = math.ceil(max_steps / steps_per_epoch) if steps_per_epoch else None
+    target_epochs = math.ceil((max_steps * accumulation_steps) / steps_per_epoch) if steps_per_epoch else None
 
     print(
         "teacher training start "
         f"device={device} device_batch_size={device_batch_size} "
+        f"accumulation_steps={accumulation_steps} "
         f"effective_batch_size={effective_batch_size} "
         f"steps_per_epoch={steps_per_epoch if steps_per_epoch is not None else 'unknown'} "
         f"max_steps={max_steps} "
@@ -171,6 +177,21 @@ def run(cfg: dict) -> None:
     model.train()
     best_loss = float("inf")
     epoch = 0
+    loss_value = float("nan")
+    optimizer.zero_grad(set_to_none=True)
+    accumulation_count = 0
+    accumulated_sample_count = 0
+    accumulated_total_tokens = 0
+    accumulated_masked_tokens = 0
+    accumulated_visible_tokens = 0
+    accumulated_loss_sum = 0.0
+    accumulated_loss_weight = 0
+    accumulated_target_sum = 0.0
+    accumulated_target_sumsq = 0.0
+    accumulated_target_numel = 0
+    accumulated_prediction_sum = 0.0
+    accumulated_prediction_sumsq = 0.0
+    accumulated_prediction_numel = 0
 
     while step < max_steps:
         epoch += 1
@@ -182,7 +203,6 @@ def run(cfg: dict) -> None:
             video, _ = unpack_video_batch(batch, device)
             mask = sample_mask_from_model(model.encoder.patch_embed, video, cfg, device)
             mask_ratio = float(mask.float().mean().item())
-            visible_tokens = float((1.0 - mask_ratio) * mask.numel() / mask.shape[0])
             if step < debug_steps:
                 _log_teacher_debug_batch(
                     step=step + 1,
@@ -198,24 +218,55 @@ def run(cfg: dict) -> None:
             prediction_for_loss = out.prediction.float()
             target_for_loss = out.target.float()
             loss = criterion(prediction_for_loss, target_for_loss)
-            target_mean = float(target_for_loss.mean().item())
-            target_std = float(target_for_loss.std(unbiased=False).item())
-            prediction_mean = float(prediction_for_loss.mean().item())
-            prediction_std = float(prediction_for_loss.std(unbiased=False).item())
-            if step < debug_steps:
-                target_mean, target_std, prediction_mean, prediction_std = _log_teacher_prediction_stats(
-                    step=step + 1,
-                    prediction=prediction_for_loss,
-                    target=target_for_loss,
-                )
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+            (loss / accumulation_steps).backward()
+
+            batch_size = int(video.size(0))
+            total_tokens = int(mask.numel())
+            masked_tokens = int(mask.sum().item())
+            visible_token_count = int((~mask).sum().item())
+            loss_weight = int(target_for_loss.numel())
+
+            accumulation_count += 1
+            accumulated_sample_count += batch_size
+            accumulated_total_tokens += total_tokens
+            accumulated_masked_tokens += masked_tokens
+            accumulated_visible_tokens += visible_token_count
+            accumulated_loss_sum += float(loss.item()) * loss_weight
+            accumulated_loss_weight += loss_weight
+            accumulated_target_sum += float(target_for_loss.sum().item())
+            accumulated_target_sumsq += float(target_for_loss.square().sum().item())
+            accumulated_target_numel += int(target_for_loss.numel())
+            accumulated_prediction_sum += float(prediction_for_loss.sum().item())
+            accumulated_prediction_sumsq += float(prediction_for_loss.square().sum().item())
+            accumulated_prediction_numel += int(prediction_for_loss.numel())
+
+            if accumulation_count < accumulation_steps:
+                continue
+
+            loss_value = accumulated_loss_sum / max(accumulated_loss_weight, 1)
+            target_mean, target_std = _mean_std_from_sums(
+                accumulated_target_sum,
+                accumulated_target_sumsq,
+                accumulated_target_numel,
+            )
+            prediction_mean, prediction_std = _mean_std_from_sums(
+                accumulated_prediction_sum,
+                accumulated_prediction_sumsq,
+                accumulated_prediction_numel,
+            )
+            mask_ratio = accumulated_masked_tokens / max(accumulated_total_tokens, 1)
+            visible_tokens = accumulated_visible_tokens / max(accumulated_sample_count, 1)
+            tokens_total_per_sample = accumulated_total_tokens / max(accumulated_sample_count, 1)
+            tokens_masked_per_sample = accumulated_masked_tokens / max(accumulated_sample_count, 1)
+            tokens_visible_per_sample = accumulated_visible_tokens / max(accumulated_sample_count, 1)
+
             lr, wd = scheduler.step(step)
             nn.utils.clip_grad_norm_(model.parameters(), cfg["optimizer"]["clip_grad"])
             optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
             step += 1
+            accumulation_count = 0
 
-            loss_value = float(loss.item())
             should_checkpoint = step % checkpoint_interval == 0 or step >= max_steps
             if should_checkpoint:
                 _save_checkpoint(model, last_checkpoint_path, label="last", step=step, loss=loss_value)
@@ -223,6 +274,15 @@ def run(cfg: dict) -> None:
                 best_loss = loss_value
                 if should_checkpoint:
                     _save_checkpoint(model, best_checkpoint_path, label="best", step=step, loss=loss_value)
+
+            if step <= debug_steps or step % log_interval == 0 or step >= max_steps:
+                _log_teacher_prediction_stats(
+                    step=step,
+                    target_mean=target_mean,
+                    target_std=target_std,
+                    prediction_mean=prediction_mean,
+                    prediction_std=prediction_std,
+                )
 
             if step % log_interval == 0 or step == 1 or step >= max_steps:
                 if steps_per_epoch is not None:
@@ -247,26 +307,40 @@ def run(cfg: dict) -> None:
                     "train/loss": loss_value,
                     "train/lr": float(lr),
                     "train/weight_decay": float(wd),
+                    "train/accumulation_steps": accumulation_steps,
                     "train/device_batch_size": device_batch_size,
                     "train/effective_batch_size": effective_batch_size,
                     "train/norm_pix_loss": float(norm_pix_loss),
-                    "train/batch_size": int(video.size(0)),
+                    "train/batch_size": accumulated_sample_count,
                     "train/dataset_size": int(dataset_size) if dataset_size is not None else 0,
-                    "train/tokens_total_per_sample": int(mask.size(1)),
-                    "train/tokens_masked_per_sample": int(mask[0].sum().item()),
-                    "train/tokens_visible_per_sample": int((~mask[0]).sum().item()),
+                    "train/tokens_total_per_sample": tokens_total_per_sample,
+                    "train/tokens_masked_per_sample": tokens_masked_per_sample,
+                    "train/tokens_visible_per_sample": tokens_visible_per_sample,
                     "train/mask_ratio": mask_ratio,
                     "train/mask_ratio_mean": mask_ratio,
                     "train/visible_tokens": visible_tokens,
-                    "train/encoder_visible_tokens_per_batch": int((~mask).sum().item()),
-                    "train/decoder_query_tokens_per_batch": int(mask.sum().item()),
-                    "train/decoder_total_tokens_per_batch": int(mask.numel()),
+                    "train/encoder_visible_tokens_per_batch": accumulated_visible_tokens,
+                    "train/decoder_query_tokens_per_batch": accumulated_masked_tokens,
+                    "train/decoder_total_tokens_per_batch": accumulated_total_tokens,
                     "train/targets_mean": target_mean,
                     "train/targets_std": target_std,
                     "train/predictions_mean": prediction_mean,
                     "train/predictions_std": prediction_std,
                 },
             )
+
+            accumulated_sample_count = 0
+            accumulated_total_tokens = 0
+            accumulated_masked_tokens = 0
+            accumulated_visible_tokens = 0
+            accumulated_loss_sum = 0.0
+            accumulated_loss_weight = 0
+            accumulated_target_sum = 0.0
+            accumulated_target_sumsq = 0.0
+            accumulated_target_numel = 0
+            accumulated_prediction_sum = 0.0
+            accumulated_prediction_sumsq = 0.0
+            accumulated_prediction_numel = 0
             if step >= max_steps:
                 break
 
@@ -286,6 +360,7 @@ def run(cfg: dict) -> None:
             "train/final_step": step,
             "train/max_steps": max_steps,
             "train/final_epoch": epoch,
+            "train/accumulation_steps": accumulation_steps,
             "train/device_batch_size": device_batch_size,
             "train/effective_batch_size": effective_batch_size,
             "train/best_loss": best_loss,

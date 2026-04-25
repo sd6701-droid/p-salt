@@ -62,6 +62,7 @@ wandb:
 
 train:
   device_batch_size: 16
+  accumulation_steps: 1
   num_workers: 12
   prefetch_factor: 6
   checkpoint_interval: 100

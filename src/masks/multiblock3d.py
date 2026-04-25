@@ -29,6 +29,7 @@ def _sample_block_dims(
     block_w = int(round(math.sqrt(target_area * aspect_ratio)))
     return max(1, min(grid_h, block_h)), max(1, min(grid_w, block_w))
 
+
 def _trim_masked_tokens_to_batch_min(mask: torch.Tensor) -> torch.Tensor:
     masked_counts = mask.sum(dim=1)
     min_masked = int(masked_counts.min().item())
@@ -56,6 +57,31 @@ def _trim_masked_tokens_to_batch_min(mask: torch.Tensor) -> torch.Tensor:
             kept = masked_ids[perm]
         trimmed[idx, kept] = True
     return trimmed
+
+
+def _trim_masked_tokens_to_target(mask: torch.Tensor, target_mask_ratio: float) -> torch.Tensor:
+    if not 0.0 < target_mask_ratio < 1.0:
+        raise ValueError(f"target_mask_ratio must be in (0, 1), got {target_mask_ratio}")
+
+    num_tokens = int(mask.size(1))
+    target_masked = max(1, min(num_tokens - 1, int(round(target_mask_ratio * num_tokens))))
+    trimmed = torch.zeros_like(mask)
+
+    for idx in range(mask.size(0)):
+        masked_ids = torch.nonzero(mask[idx], as_tuple=False).flatten()
+        if masked_ids.numel() < target_masked:
+            visible_ids = torch.nonzero(~mask[idx], as_tuple=False).flatten()
+            n_add = target_masked - masked_ids.numel()
+            perm = torch.randperm(visible_ids.numel(), device=mask.device)[:n_add]
+            extra = visible_ids[perm]
+            kept = torch.cat([masked_ids, extra])
+        else:
+            perm = torch.randperm(masked_ids.numel(), device=mask.device)[:target_masked]
+            kept = masked_ids[perm]
+        trimmed[idx, kept] = True
+
+    return trimmed
+
 
 def _sample_profile_mask(
     *,
@@ -120,6 +146,7 @@ def sample_multi_block_mask(
     short_num_blocks: int = 8,
     long_num_blocks: int = 2,
     profile_sampling: str = "random",
+    target_mask_ratio: float | None = None,
     device: torch.device | None = None,
 ) -> torch.Tensor:
     if short_num_blocks <= 0 or long_num_blocks <= 0:
@@ -194,5 +221,8 @@ def sample_multi_block_mask(
         )
     else:
         raise ValueError(f"Unknown multiblock profile_sampling '{profile_sampling}'")
+
+    if target_mask_ratio is not None:
+        mask = _trim_masked_tokens_to_target(mask, target_mask_ratio)
 
     return mask

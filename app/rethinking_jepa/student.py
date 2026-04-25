@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 import traceback
@@ -154,6 +155,14 @@ def _log_student_prediction_diagnostics(
     )
 
 
+def _mean_std_from_sums(sum_value: float, sumsq_value: float, count: int) -> tuple[float, float]:
+    if count <= 0:
+        return 0.0, 0.0
+    mean = sum_value / count
+    variance = max(0.0, (sumsq_value / count) - (mean * mean))
+    return mean, math.sqrt(variance)
+
+
 def run(cfg: dict) -> None:
     device = resolve_device()
     teacher, _ = build_teacher_from_cfg(cfg, device)
@@ -161,7 +170,7 @@ def run(cfg: dict) -> None:
 
     student = build_student_from_cfg(cfg, teacher, device)
     loader = build_loader(cfg)
-    device_batch_size, effective_batch_size = resolve_batch_settings(cfg)
+    device_batch_size, accumulation_steps, effective_batch_size = resolve_batch_settings(cfg)
     max_steps = resolve_max_steps(cfg)
     best_checkpoint_path, last_checkpoint_path = checkpoint_paths(cfg)
     wandb_run = init_wandb_run(cfg, job_type="student-train")
@@ -188,6 +197,7 @@ def run(cfg: dict) -> None:
     print(
         "student training start "
         f"device={device} device_batch_size={device_batch_size} "
+        f"accumulation_steps={accumulation_steps} "
         f"effective_batch_size={effective_batch_size} "
         f"steps_per_epoch={steps_per_epoch if steps_per_epoch is not None else 'unknown'} "
         f"max_steps={max_steps} precision={precision} "
@@ -199,6 +209,25 @@ def run(cfg: dict) -> None:
     student.train()
     best_loss = float("inf")
     epoch = 0
+    loss_value = float("nan")
+    optimizer.zero_grad(set_to_none=True)
+    accumulation_count = 0
+    accumulated_sample_count = 0
+    accumulated_total_tokens = 0
+    accumulated_masked_tokens = 0
+    accumulated_visible_tokens = 0
+    accumulated_loss_sum = 0.0
+    accumulated_loss_weight = 0
+    accumulated_target_sum = 0.0
+    accumulated_target_sumsq = 0.0
+    accumulated_target_numel = 0
+    accumulated_prediction_sum = 0.0
+    accumulated_prediction_sumsq = 0.0
+    accumulated_prediction_numel = 0
+    accumulated_target_token_norm_sum = 0.0
+    accumulated_prediction_token_norm_sum = 0.0
+    accumulated_cosine_similarity_sum = 0.0
+    accumulated_token_count = 0
 
     while step < max_steps:
         epoch += 1
@@ -209,8 +238,6 @@ def run(cfg: dict) -> None:
             last_epoch_step = epoch_step
             video, _ = unpack_video_batch(batch, device)
             mask = sample_mask_from_model(student.student.patch_embed, video, cfg, device)
-            mask_ratio = float(mask.float().mean().item())
-            visible_tokens = float((1.0 - mask_ratio) * mask.numel() / mask.shape[0])
             if step < debug_steps:
                 _log_student_debug_batch(
                     step=step + 1,
@@ -226,26 +253,71 @@ def run(cfg: dict) -> None:
             prediction_for_loss = out.prediction.float()
             target_for_loss = out.target.float()
             loss = criterion(prediction_for_loss, target_for_loss)
-            diagnostics = _student_prediction_diagnostics(
-                prediction=prediction_for_loss,
-                target=target_for_loss,
+            (loss / accumulation_steps).backward()
+
+            batch_size = int(video.size(0))
+            total_tokens = int(mask.numel())
+            masked_tokens = int(mask.sum().item())
+            visible_token_count = int((~mask).sum().item())
+            token_count = int(prediction_for_loss.shape[0] * prediction_for_loss.shape[1])
+            loss_weight = int(target_for_loss.numel())
+
+            accumulation_count += 1
+            accumulated_sample_count += batch_size
+            accumulated_total_tokens += total_tokens
+            accumulated_masked_tokens += masked_tokens
+            accumulated_visible_tokens += visible_token_count
+            accumulated_loss_sum += float(loss.item()) * loss_weight
+            accumulated_loss_weight += loss_weight
+            accumulated_target_sum += float(target_for_loss.sum().item())
+            accumulated_target_sumsq += float(target_for_loss.square().sum().item())
+            accumulated_target_numel += int(target_for_loss.numel())
+            accumulated_prediction_sum += float(prediction_for_loss.sum().item())
+            accumulated_prediction_sumsq += float(prediction_for_loss.square().sum().item())
+            accumulated_prediction_numel += int(prediction_for_loss.numel())
+            accumulated_target_token_norm_sum += float(target_for_loss.norm(dim=-1).sum().item())
+            accumulated_prediction_token_norm_sum += float(prediction_for_loss.norm(dim=-1).sum().item())
+            accumulated_cosine_similarity_sum += float(
+                F.cosine_similarity(prediction_for_loss, target_for_loss, dim=-1).sum().item()
             )
-            should_log_prediction_diagnostics = (
-                step < debug_steps or (step + 1) % log_interval == 0 or step == 0 or step + 1 >= max_steps
+            accumulated_token_count += token_count
+
+            if accumulation_count < accumulation_steps:
+                continue
+
+            loss_value = accumulated_loss_sum / max(accumulated_loss_weight, 1)
+            target_mean, target_std = _mean_std_from_sums(
+                accumulated_target_sum,
+                accumulated_target_sumsq,
+                accumulated_target_numel,
             )
-            if should_log_prediction_diagnostics:
-                _log_student_prediction_diagnostics(
-                    step=step + 1,
-                    diagnostics=diagnostics,
-                )
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+            prediction_mean, prediction_std = _mean_std_from_sums(
+                accumulated_prediction_sum,
+                accumulated_prediction_sumsq,
+                accumulated_prediction_numel,
+            )
+            diagnostics = {
+                "target_mean": target_mean,
+                "target_std": target_std,
+                "prediction_mean": prediction_mean,
+                "prediction_std": prediction_std,
+                "cosine_similarity": accumulated_cosine_similarity_sum / max(accumulated_token_count, 1),
+                "target_token_norm_mean": accumulated_target_token_norm_sum / max(accumulated_token_count, 1),
+                "prediction_token_norm_mean": accumulated_prediction_token_norm_sum / max(accumulated_token_count, 1),
+            }
+            mask_ratio = accumulated_masked_tokens / max(accumulated_total_tokens, 1)
+            visible_tokens = accumulated_visible_tokens / max(accumulated_sample_count, 1)
+            tokens_total_per_sample = accumulated_total_tokens / max(accumulated_sample_count, 1)
+            tokens_masked_per_sample = accumulated_masked_tokens / max(accumulated_sample_count, 1)
+            tokens_visible_per_sample = accumulated_visible_tokens / max(accumulated_sample_count, 1)
+
             lr, wd = scheduler.step(step)
             nn.utils.clip_grad_norm_(student.parameters(), cfg["optimizer"]["clip_grad"])
             optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
             step += 1
+            accumulation_count = 0
 
-            loss_value = float(loss.item())
             should_checkpoint = step % checkpoint_interval == 0 or step >= max_steps
             if should_checkpoint:
                 _save_student_checkpoint(
@@ -265,6 +337,13 @@ def run(cfg: dict) -> None:
                         step=step,
                         loss=loss_value,
                     )
+
+            should_log_prediction_diagnostics = step <= debug_steps or step % log_interval == 0 or step >= max_steps
+            if should_log_prediction_diagnostics:
+                _log_student_prediction_diagnostics(
+                    step=step,
+                    diagnostics=diagnostics,
+                )
 
             if step % log_interval == 0 or step == 1 or step >= max_steps:
                 if steps_per_epoch is not None:
@@ -289,19 +368,20 @@ def run(cfg: dict) -> None:
                     "train/loss": loss_value,
                     "train/lr": float(lr),
                     "train/weight_decay": float(wd),
+                    "train/accumulation_steps": accumulation_steps,
                     "train/device_batch_size": device_batch_size,
                     "train/effective_batch_size": effective_batch_size,
-                    "train/batch_size": int(video.size(0)),
+                    "train/batch_size": accumulated_sample_count,
                     "train/dataset_size": int(dataset_size) if dataset_size is not None else 0,
-                    "train/tokens_total_per_sample": int(mask.size(1)),
-                    "train/tokens_masked_per_sample": int(mask[0].sum().item()),
-                    "train/tokens_visible_per_sample": int((~mask[0]).sum().item()),
+                    "train/tokens_total_per_sample": tokens_total_per_sample,
+                    "train/tokens_masked_per_sample": tokens_masked_per_sample,
+                    "train/tokens_visible_per_sample": tokens_visible_per_sample,
                     "train/mask_ratio": mask_ratio,
                     "train/mask_ratio_mean": mask_ratio,
                     "train/visible_tokens": visible_tokens,
-                    "train/frozen_teacher_tokens_per_batch": int(mask.numel()),
-                    "train/student_visible_tokens_per_batch": int((~mask).sum().item()),
-                    "train/predictor_query_tokens_per_batch": int(mask.sum().item()),
+                    "train/frozen_teacher_tokens_per_batch": accumulated_total_tokens,
+                    "train/student_visible_tokens_per_batch": accumulated_visible_tokens,
+                    "train/predictor_query_tokens_per_batch": accumulated_masked_tokens,
                     "train/targets_mean": diagnostics["target_mean"],
                     "train/targets_std": diagnostics["target_std"],
                     "train/targets_token_norm_mean": diagnostics["target_token_norm_mean"],
@@ -311,6 +391,23 @@ def run(cfg: dict) -> None:
                     "train/predictions_targets_cosine_similarity": diagnostics["cosine_similarity"],
                 },
             )
+
+            accumulated_sample_count = 0
+            accumulated_total_tokens = 0
+            accumulated_masked_tokens = 0
+            accumulated_visible_tokens = 0
+            accumulated_loss_sum = 0.0
+            accumulated_loss_weight = 0
+            accumulated_target_sum = 0.0
+            accumulated_target_sumsq = 0.0
+            accumulated_target_numel = 0
+            accumulated_prediction_sum = 0.0
+            accumulated_prediction_sumsq = 0.0
+            accumulated_prediction_numel = 0
+            accumulated_target_token_norm_sum = 0.0
+            accumulated_prediction_token_norm_sum = 0.0
+            accumulated_cosine_similarity_sum = 0.0
+            accumulated_token_count = 0
             if step >= max_steps:
                 break
 
@@ -343,6 +440,7 @@ def run(cfg: dict) -> None:
             "train/max_steps": max_steps,
             "train/final_epoch": epoch,
             "train/teacher_checkpoint": str(cfg["train"]["teacher_checkpoint"]),
+            "train/accumulation_steps": accumulation_steps,
             "train/device_batch_size": device_batch_size,
             "train/effective_batch_size": effective_batch_size,
             "train/best_loss": best_loss,
