@@ -96,6 +96,7 @@ def _log_student_debug_batch(
     total_tokens_per_sample = int(mask.size(1))
     masked_tokens_per_sample = int(mask[0].sum().item())
     visible_tokens_per_sample = total_tokens_per_sample - masked_tokens_per_sample
+    mask_ratio = float(mask.float().mean().item())
 
     print(
         "student debug "
@@ -105,6 +106,7 @@ def _log_student_debug_batch(
         f"teacher_tokens_per_sample={total_tokens_per_sample} "
         f"masked_tokens_per_sample={masked_tokens_per_sample} "
         f"student_visible_tokens_per_sample={visible_tokens_per_sample} "
+        f"mask_ratio={mask_ratio:.6f} "
         f"teacher_tokens_per_batch={total_tokens_per_sample * batch_size} "
         f"student_visible_tokens_per_batch={visible_tokens_per_sample * batch_size} "
         f"predictor_query_tokens_per_batch={masked_tokens_per_sample * batch_size}"
@@ -207,6 +209,8 @@ def run(cfg: dict) -> None:
             last_epoch_step = epoch_step
             video, _ = unpack_video_batch(batch, device)
             mask = sample_mask_from_model(student.student.patch_embed, video, cfg, device)
+            mask_ratio = float(mask.float().mean().item())
+            visible_tokens = float((1.0 - mask_ratio) * mask.numel() / mask.shape[0])
             if step < debug_steps:
                 _log_student_debug_batch(
                     step=step + 1,
@@ -292,6 +296,9 @@ def run(cfg: dict) -> None:
                     "train/tokens_total_per_sample": int(mask.size(1)),
                     "train/tokens_masked_per_sample": int(mask[0].sum().item()),
                     "train/tokens_visible_per_sample": int((~mask[0]).sum().item()),
+                    "train/mask_ratio": mask_ratio,
+                    "train/mask_ratio_mean": mask_ratio,
+                    "train/visible_tokens": visible_tokens,
                     "train/frozen_teacher_tokens_per_batch": int(mask.numel()),
                     "train/student_visible_tokens_per_batch": int((~mask).sum().item()),
                     "train/predictor_query_tokens_per_batch": int(mask.sum().item()),

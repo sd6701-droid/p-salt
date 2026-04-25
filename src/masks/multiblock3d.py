@@ -73,7 +73,6 @@ def _sample_profile_mask(
         device=device,
     )
 
-
 def sample_spatiotemporal_block_mask(
     batch_size: int,
     grid_t: int,
@@ -86,15 +85,19 @@ def sample_spatiotemporal_block_mask(
     device: torch.device | None = None,
 ) -> torch.Tensor:
     mask = torch.zeros(batch_size, grid_t, grid_h, grid_w, dtype=torch.bool, device=device)
-    block_t = max(1, min(grid_t, int(round(grid_t * _sample_scale(temporal_scale)))))
-    block_h, block_w = _sample_block_dims(grid_h, grid_w, spatial_scale, aspect_ratio_range)
+    
     for idx in range(batch_size):
         for _ in range(num_blocks):
+            # Sample fresh dimensions for THIS block
+            block_t = max(1, min(grid_t, int(round(grid_t * _sample_scale(temporal_scale)))))
+            block_h, block_w = _sample_block_dims(grid_h, grid_w, spatial_scale, aspect_ratio_range)
+            
             start_t = 0 if block_t == grid_t else random.randint(0, grid_t - block_t)
             start_h = 0 if block_h == grid_h else random.randint(0, grid_h - block_h)
             start_w = 0 if block_w == grid_w else random.randint(0, grid_w - block_w)
             mask[idx, start_t : start_t + block_t, start_h : start_h + block_h, start_w : start_w + block_w] = True
-    return _trim_masked_tokens_to_batch_min(mask.flatten(1))
+    
+    return mask.flatten(1)   # Return raw mask, do NOT trim here
 
 
 def sample_multi_block_mask(
