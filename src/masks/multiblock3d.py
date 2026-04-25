@@ -49,6 +49,31 @@ def _trim_masked_tokens_to_batch_min(mask: torch.Tensor) -> torch.Tensor:
     return trimmed
 
 
+def _sample_profile_mask(
+    *,
+    batch_size: int,
+    grid_t: int,
+    grid_h: int,
+    grid_w: int,
+    spatial_scale: float | Sequence[float],
+    temporal_scale: float | Sequence[float],
+    aspect_ratio_range: tuple[float, float],
+    num_blocks: int,
+    device: torch.device | None,
+) -> torch.Tensor:
+    return sample_spatiotemporal_block_mask(
+        batch_size=batch_size,
+        grid_t=grid_t,
+        grid_h=grid_h,
+        grid_w=grid_w,
+        spatial_scale=spatial_scale,
+        temporal_scale=temporal_scale,
+        aspect_ratio_range=aspect_ratio_range,
+        num_blocks=num_blocks,
+        device=device,
+    )
+
+
 def sample_spatiotemporal_block_mask(
     batch_size: int,
     grid_t: int,
@@ -91,32 +116,80 @@ def sample_multi_block_mask(
 
     profile = profile_sampling.lower()
     if profile == "short":
-        spatial_scale = short_spatial_scale
-        num_blocks = short_num_blocks
+        mask = _sample_profile_mask(
+            batch_size=batch_size,
+            grid_t=grid_t,
+            grid_h=grid_h,
+            grid_w=grid_w,
+            spatial_scale=short_spatial_scale,
+            temporal_scale=temporal_scale,
+            aspect_ratio_range=aspect_ratio_range,
+            num_blocks=short_num_blocks,
+            device=device,
+        )
     elif profile == "long":
-        spatial_scale = long_spatial_scale
-        num_blocks = long_num_blocks
-    elif profile in {"random", "mixed"}:
+        mask = _sample_profile_mask(
+            batch_size=batch_size,
+            grid_t=grid_t,
+            grid_h=grid_h,
+            grid_w=grid_w,
+            spatial_scale=long_spatial_scale,
+            temporal_scale=temporal_scale,
+            aspect_ratio_range=aspect_ratio_range,
+            num_blocks=long_num_blocks,
+            device=device,
+        )
+    elif profile in {"random", "mixed", "both", "all", "vjepa"}:
+        short_mask = _sample_profile_mask(
+            batch_size=batch_size,
+            grid_t=grid_t,
+            grid_h=grid_h,
+            grid_w=grid_w,
+            spatial_scale=short_spatial_scale,
+            temporal_scale=temporal_scale,
+            aspect_ratio_range=aspect_ratio_range,
+            num_blocks=short_num_blocks,
+            device=device,
+        )
+        long_mask = _sample_profile_mask(
+            batch_size=batch_size,
+            grid_t=grid_t,
+            grid_h=grid_h,
+            grid_w=grid_w,
+            spatial_scale=long_spatial_scale,
+            temporal_scale=temporal_scale,
+            aspect_ratio_range=aspect_ratio_range,
+            num_blocks=long_num_blocks,
+            device=device,
+        )
+        mask = _trim_masked_tokens_to_batch_min(short_mask | long_mask)
+    elif profile in {"either", "choose_one"}:
         spatial_scale, num_blocks = random.choice(
             [
                 (short_spatial_scale, short_num_blocks),
                 (long_spatial_scale, long_num_blocks),
             ]
         )
+        mask = _sample_profile_mask(
+            batch_size=batch_size,
+            grid_t=grid_t,
+            grid_h=grid_h,
+            grid_w=grid_w,
+            spatial_scale=spatial_scale,
+            temporal_scale=temporal_scale,
+            aspect_ratio_range=aspect_ratio_range,
+            num_blocks=num_blocks,
+            device=device,
+        )
     else:
         raise ValueError(f"Unknown multiblock profile_sampling '{profile_sampling}'")
 
-    mask = sample_spatiotemporal_block_mask(
-        batch_size=batch_size,
-        grid_t=grid_t,
-        grid_h=grid_h,
-        grid_w=grid_w,
-        spatial_scale=spatial_scale,
-        temporal_scale=temporal_scale,
-        aspect_ratio_range=aspect_ratio_range,
-        num_blocks=num_blocks,
-        device=device,
-    )
-    if (~mask).sum(dim=1).min().item() <= 0 or mask.sum(dim=1).min().item() <= 0:
+    masked_counts = mask.sum(dim=1)
+    visible_counts = (~mask).sum(dim=1)
+    if (
+        masked_counts.min().item() <= 0
+        or visible_counts.min().item() <= 0
+        or masked_counts.min().item() != masked_counts.max().item()
+    ):
         return sample_token_mask(batch_size, grid_t * grid_h * grid_w, 0.75, device=device)
     return mask
