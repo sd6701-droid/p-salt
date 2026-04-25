@@ -42,7 +42,7 @@ optimizer:
   final_lr: 1.0e-6
   start_weight_decay: 0.05
   end_weight_decay: 0.05
-  clip_grad: 1.0
+  clip_grad: 0.5
   warmup_steps: 300
   betas: [0.9, 0.95]
 
