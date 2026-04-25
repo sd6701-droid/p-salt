@@ -29,25 +29,33 @@ def _sample_block_dims(
     block_w = int(round(math.sqrt(target_area * aspect_ratio)))
     return max(1, min(grid_h, block_h)), max(1, min(grid_w, block_w))
 
-
 def _trim_masked_tokens_to_batch_min(mask: torch.Tensor) -> torch.Tensor:
     masked_counts = mask.sum(dim=1)
     min_masked = int(masked_counts.min().item())
-    max_masked = int(masked_counts.max().item())
     num_tokens = int(mask.size(1))
-
-    if min_masked == max_masked:
-        return mask
-
-    if min_masked <= 0 or max_masked >= num_tokens:
-        return mask
-
+    
+    # Edge case: if min is 0 or all masked, force a sensible target
+    if min_masked == 0:
+        # Some sample had no masks at all. Pick a target near 90%.
+        min_masked = int(0.9 * num_tokens)
+    if min_masked >= num_tokens:
+        min_masked = num_tokens - 1  # leave at least one visible
+    
     trimmed = torch.zeros_like(mask)
     for idx in range(mask.size(0)):
         masked_ids = torch.nonzero(mask[idx], as_tuple=False).flatten()
-        trimmed[idx, masked_ids[:min_masked]] = True
+        if masked_ids.numel() < min_masked:
+            # This sample didn't have enough masks. Add random ones.
+            visible_ids = torch.nonzero(~mask[idx], as_tuple=False).flatten()
+            n_add = min_masked - masked_ids.numel()
+            perm = torch.randperm(visible_ids.numel(), device=mask.device)[:n_add]
+            extra = visible_ids[perm]
+            kept = torch.cat([masked_ids, extra])
+        else:
+            perm = torch.randperm(masked_ids.numel(), device=mask.device)[:min_masked]
+            kept = masked_ids[perm]
+        trimmed[idx, kept] = True
     return trimmed
-
 
 def _sample_profile_mask(
     *,
@@ -187,12 +195,4 @@ def sample_multi_block_mask(
     else:
         raise ValueError(f"Unknown multiblock profile_sampling '{profile_sampling}'")
 
-    masked_counts = mask.sum(dim=1)
-    visible_counts = (~mask).sum(dim=1)
-    if (
-        masked_counts.min().item() <= 0
-        or visible_counts.min().item() <= 0
-        or masked_counts.min().item() != masked_counts.max().item()
-    ):
-        return sample_token_mask(batch_size, grid_t * grid_h * grid_w, 0.75, device=device)
     return mask
