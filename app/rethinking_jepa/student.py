@@ -19,6 +19,15 @@ if __package__ in (None, ""):
         build_scheduler,
         build_student_from_cfg,
         build_teacher_from_cfg,
+        mask_base_tokens_per_sample,
+        mask_batch_size,
+        mask_masked_tokens_per_sample,
+        mask_masked_tokens_total,
+        mask_num_views,
+        mask_ratio,
+        mask_total_tokens_total,
+        mask_visible_tokens_per_sample,
+        mask_visible_tokens_total,
         resolve_device,
         resolve_batch_settings,
         resolve_dataset_size,
@@ -41,6 +50,15 @@ else:
         build_scheduler,
         build_student_from_cfg,
         build_teacher_from_cfg,
+        mask_base_tokens_per_sample,
+        mask_batch_size,
+        mask_masked_tokens_per_sample,
+        mask_masked_tokens_total,
+        mask_num_views,
+        mask_ratio,
+        mask_total_tokens_total,
+        mask_visible_tokens_per_sample,
+        mask_visible_tokens_total,
         resolve_device,
         resolve_batch_settings,
         resolve_dataset_size,
@@ -93,11 +111,12 @@ def _log_student_debug_batch(
     mask: torch.Tensor,
     dataset_size: int | None,
 ) -> None:
-    batch_size = int(video.size(0))
-    total_tokens_per_sample = int(mask.size(1))
-    masked_tokens_per_sample = int(mask[0].sum().item())
-    visible_tokens_per_sample = total_tokens_per_sample - masked_tokens_per_sample
-    mask_ratio = float(mask.float().mean().item())
+    batch_size = mask_batch_size(mask)
+    total_tokens_per_sample = mask_base_tokens_per_sample(mask)
+    masked_tokens_per_sample = mask_masked_tokens_per_sample(mask)
+    visible_tokens_per_sample = mask_visible_tokens_per_sample(mask)
+    mask_ratio_value = mask_ratio(mask)
+    mask_views = mask_num_views(mask)
 
     print(
         "student debug "
@@ -105,9 +124,10 @@ def _log_student_debug_batch(
         f"dataset_size={dataset_size if dataset_size is not None else 'unknown'} "
         f"batch_size={batch_size} "
         f"teacher_tokens_per_sample={total_tokens_per_sample} "
+        f"mask_views={mask_views} "
         f"masked_tokens_per_sample={masked_tokens_per_sample} "
         f"student_visible_tokens_per_sample={visible_tokens_per_sample} "
-        f"mask_ratio={mask_ratio:.6f} "
+        f"mask_ratio={mask_ratio_value:.6f} "
         f"teacher_tokens_per_batch={total_tokens_per_sample * batch_size} "
         f"student_visible_tokens_per_batch={visible_tokens_per_sample * batch_size} "
         f"predictor_query_tokens_per_batch={masked_tokens_per_sample * batch_size}"
@@ -255,10 +275,10 @@ def run(cfg: dict) -> None:
             loss = criterion(prediction_for_loss, target_for_loss)
             (loss / accumulation_steps).backward()
 
-            batch_size = int(video.size(0))
-            total_tokens = int(mask.numel())
-            masked_tokens = int(mask.sum().item())
-            visible_token_count = int((~mask).sum().item())
+            batch_size = mask_batch_size(mask)
+            total_tokens = mask_total_tokens_total(mask)
+            masked_tokens = mask_masked_tokens_total(mask)
+            visible_token_count = mask_visible_tokens_total(mask)
             token_count = int(prediction_for_loss.shape[0] * prediction_for_loss.shape[1])
             loss_weight = int(target_for_loss.numel())
 
@@ -305,11 +325,12 @@ def run(cfg: dict) -> None:
                 "target_token_norm_mean": accumulated_target_token_norm_sum / max(accumulated_token_count, 1),
                 "prediction_token_norm_mean": accumulated_prediction_token_norm_sum / max(accumulated_token_count, 1),
             }
-            mask_ratio = accumulated_masked_tokens / max(accumulated_total_tokens, 1)
+            mask_ratio_value = accumulated_masked_tokens / max(accumulated_total_tokens, 1)
             visible_tokens = accumulated_visible_tokens / max(accumulated_sample_count, 1)
-            tokens_total_per_sample = accumulated_total_tokens / max(accumulated_sample_count, 1)
+            tokens_total_per_sample = mask_base_tokens_per_sample(mask)
             tokens_masked_per_sample = accumulated_masked_tokens / max(accumulated_sample_count, 1)
             tokens_visible_per_sample = accumulated_visible_tokens / max(accumulated_sample_count, 1)
+            mask_views = mask_num_views(mask)
 
             lr, wd = scheduler.step(step)
             nn.utils.clip_grad_norm_(student.parameters(), cfg["optimizer"]["clip_grad"])
@@ -371,13 +392,14 @@ def run(cfg: dict) -> None:
                     "train/accumulation_steps": accumulation_steps,
                     "train/device_batch_size": device_batch_size,
                     "train/effective_batch_size": effective_batch_size,
+                    "train/mask_views": mask_views,
                     "train/batch_size": accumulated_sample_count,
                     "train/dataset_size": int(dataset_size) if dataset_size is not None else 0,
                     "train/tokens_total_per_sample": tokens_total_per_sample,
                     "train/tokens_masked_per_sample": tokens_masked_per_sample,
                     "train/tokens_visible_per_sample": tokens_visible_per_sample,
-                    "train/mask_ratio": mask_ratio,
-                    "train/mask_ratio_mean": mask_ratio,
+                    "train/mask_ratio": mask_ratio_value,
+                    "train/mask_ratio_mean": mask_ratio_value,
                     "train/visible_tokens": visible_tokens,
                     "train/frozen_teacher_tokens_per_batch": accumulated_total_tokens,
                     "train/student_visible_tokens_per_batch": accumulated_visible_tokens,

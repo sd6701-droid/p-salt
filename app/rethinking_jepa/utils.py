@@ -10,6 +10,19 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset, IterableDataset
 from src.datasets.data_manager import build_video_dataset
 from src.masks.default import sample_token_mask
 from src.masks.multiblock3d import sample_multi_block_mask
+from src.masks.types import (
+    IndexedMaskSet,
+    mask_base_tokens_per_sample,
+    mask_batch_size,
+    mask_masked_tokens_per_sample,
+    mask_masked_tokens_total,
+    mask_num_views,
+    mask_ratio,
+    mask_total_tokens_total,
+    mask_visible_tokens_per_sample,
+    mask_visible_tokens_total,
+)
+from src.masks.vjepa_exact import VJEPAMultiMaskSampler
 from src.models.architectures import resolve_model_config
 from src.models.dinov2_init import initialize_video_encoder_from_dinov2
 from src.models.jepa import StudentModel, TeacherModel
@@ -222,12 +235,50 @@ def build_scheduler(
     )
 
 
+def _build_vjepa_mask_cfgs(masking_cfg: dict) -> list[dict]:
+    return [
+        {
+            "aspect_ratio": list(masking_cfg["mask_aspect_ratio"]),
+            "full_complement": False,
+            "max_keep": None,
+            "max_temporal_keep": float(masking_cfg.get("max_temporal_keep", 1.0)),
+            "num_blocks": int(masking_cfg.get("short_num_blocks", 8)),
+            "spatial_scale": [float(masking_cfg["short_spatial_mask_scale"])] * 2,
+            "temporal_scale": [float(masking_cfg["temporal_mask_scale"])] * 2,
+        },
+        {
+            "aspect_ratio": list(masking_cfg["mask_aspect_ratio"]),
+            "full_complement": False,
+            "max_keep": None,
+            "max_temporal_keep": float(masking_cfg.get("max_temporal_keep", 1.0)),
+            "num_blocks": int(masking_cfg.get("long_num_blocks", 2)),
+            "spatial_scale": [float(masking_cfg["long_spatial_mask_scale"])] * 2,
+            "temporal_scale": [float(masking_cfg["temporal_mask_scale"])] * 2,
+        },
+    ]
+
+
+def _get_or_create_vjepa_sampler(patch_embed, cfg: dict) -> VJEPAMultiMaskSampler:
+    sampler = getattr(patch_embed, "_vjepa_mask_sampler", None)
+    if sampler is not None:
+        return sampler
+    sampler = VJEPAMultiMaskSampler(
+        crop_size=int(cfg["data"]["input_size"]),
+        num_frames=int(cfg["data"]["frames"]),
+        patch_size=int(patch_embed.patch_size),
+        tubelet_size=int(patch_embed.tubelet_size),
+        mask_cfgs=_build_vjepa_mask_cfgs(cfg["masking"]),
+    )
+    setattr(patch_embed, "_vjepa_mask_sampler", sampler)
+    return sampler
+
+
 def sample_mask_from_model(
     patch_embed,
     video: torch.Tensor,
     cfg: dict,
     device: torch.device,
-) -> torch.Tensor:
+) -> torch.Tensor | IndexedMaskSet:
     with torch.no_grad():
         _, grid = patch_embed(video)
     masking_cfg = cfg["masking"]
@@ -262,4 +313,32 @@ def sample_mask_from_model(
             device=device,
         )
 
+    if strategy in {"multiseq_multiblock3d", "vjepa_exact", "vjepa_multiblock3d"}:
+        sampler = _get_or_create_vjepa_sampler(patch_embed, cfg)
+        return sampler(batch_size=video.size(0), device=device)
+
     raise ValueError(f"Unknown masking.strategy '{strategy}'")
+
+
+__all__ = [
+    "IndexedMaskSet",
+    "build_loader",
+    "build_scheduler",
+    "build_student_from_cfg",
+    "build_teacher_from_cfg",
+    "mask_base_tokens_per_sample",
+    "mask_batch_size",
+    "mask_masked_tokens_per_sample",
+    "mask_masked_tokens_total",
+    "mask_num_views",
+    "mask_ratio",
+    "mask_total_tokens_total",
+    "mask_visible_tokens_per_sample",
+    "mask_visible_tokens_total",
+    "resolve_batch_settings",
+    "resolve_dataset_size",
+    "resolve_device",
+    "resolve_max_steps",
+    "sample_mask_from_model",
+    "unpack_video_batch",
+]

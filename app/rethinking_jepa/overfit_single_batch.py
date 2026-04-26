@@ -15,6 +15,11 @@ if __package__ in (None, ""):
 from app.rethinking_jepa.utils import (
     build_loader,
     build_teacher_from_cfg,
+    mask_base_tokens_per_sample,
+    mask_masked_tokens_per_sample,
+    mask_num_views,
+    mask_ratio,
+    mask_visible_tokens_per_sample,
     resolve_device,
     sample_mask_from_model,
     unpack_video_batch,
@@ -112,8 +117,11 @@ def run(args: argparse.Namespace) -> None:
     print(
         "single-batch overfit start "
         f"device={device} precision={precision} steps={args.steps} "
-        f"batch_shape={tuple(video.shape)} total_tokens={mask.size(1)} "
-        f"masked_tokens={int(mask[0].sum().item())} visible_tokens={int((~mask[0]).sum().item())}"
+        f"batch_shape={tuple(video.shape)} total_tokens={mask_base_tokens_per_sample(mask)} "
+        f"mask_views={mask_num_views(mask)} "
+        f"masked_tokens={mask_masked_tokens_per_sample(mask)} "
+        f"visible_tokens={mask_visible_tokens_per_sample(mask)} "
+        f"mask_ratio={mask_ratio(mask):.6f}"
     )
 
     final_loss = None

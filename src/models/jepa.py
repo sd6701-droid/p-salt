@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import torch
 from torch import nn
 
+from src.masks.types import IndexedMaskSet
+
 from .predictor import LatentPredictor, ReconstructionDecoder
 from .vision_transformer import VideoTransformerEncoder
 
@@ -23,6 +25,13 @@ def _ids_from_mask(mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     visible_ids = ids.masked_select(~mask).view(mask.size(0), -1)
     masked_ids = ids.masked_select(mask).view(mask.size(0), -1)
     return visible_ids, masked_ids
+
+
+def _mask_pairs(mask: torch.Tensor | IndexedMaskSet) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    if isinstance(mask, IndexedMaskSet):
+        return list(zip(mask.encoder_ids, mask.predictor_ids, strict=True))
+    visible_ids, masked_ids = _ids_from_mask(mask)
+    return [(visible_ids, masked_ids)]
 
 
 def patchify_video(
@@ -60,7 +69,7 @@ def normalize_patch_targets(targets: torch.Tensor, eps: float = 1.0e-6) -> torch
 class ModelOutput:
     prediction: torch.Tensor
     target: torch.Tensor
-    mask: torch.Tensor
+    mask: torch.Tensor | IndexedMaskSet
 
 
 class TeacherModel(nn.Module):
@@ -104,22 +113,27 @@ class TeacherModel(nn.Module):
         self.norm_pix_loss = norm_pix_loss
         self.norm_pix_eps = norm_pix_eps
 
-    def forward(self, video: torch.Tensor, mask: torch.Tensor) -> ModelOutput:
+    def forward(self, video: torch.Tensor, mask: torch.Tensor | IndexedMaskSet) -> ModelOutput:
         tokens, pos = self.encoder.embed(video)
-        visible_ids, masked_ids = _ids_from_mask(mask)
-        visible_tokens = _gather_tokens(tokens, visible_ids)
-        visible_pos = _gather_tokens(pos, visible_ids)
-        masked_pos = _gather_tokens(pos, masked_ids)
-        visible_latents = self.encoder.forward_tokens(visible_tokens)
-        prediction = self.decoder(visible_latents, visible_pos, masked_pos)
         patches = patchify_video(
             video,
             tubelet_size=self.encoder.tubelet_size,
             patch_size=self.encoder.patch_size,
         )
-        target = _gather_tokens(patches, masked_ids)
-        if self.norm_pix_loss:
-            target = normalize_patch_targets(target, eps=self.norm_pix_eps)
+        predictions: list[torch.Tensor] = []
+        targets: list[torch.Tensor] = []
+        for visible_ids, masked_ids in _mask_pairs(mask):
+            visible_tokens = _gather_tokens(tokens, visible_ids)
+            visible_pos = _gather_tokens(pos, visible_ids)
+            masked_pos = _gather_tokens(pos, masked_ids)
+            visible_latents = self.encoder.forward_tokens(visible_tokens)
+            predictions.append(self.decoder(visible_latents, visible_pos, masked_pos))
+            target = _gather_tokens(patches, masked_ids)
+            if self.norm_pix_loss:
+                target = normalize_patch_targets(target, eps=self.norm_pix_eps)
+            targets.append(target)
+        prediction = torch.cat(predictions, dim=1)
+        target = torch.cat(targets, dim=1)
         return ModelOutput(prediction=prediction, target=target, mask=mask)
 
 
@@ -175,15 +189,19 @@ class StudentModel(nn.Module):
             target_embed_dim=encoder.embed_dim,
         )
 
-    def forward(self, video: torch.Tensor, mask: torch.Tensor) -> ModelOutput:
+    def forward(self, video: torch.Tensor, mask: torch.Tensor | IndexedMaskSet) -> ModelOutput:
         with torch.no_grad():
             teacher_tokens, _ = self.teacher.encoder(video)
         student_tokens, pos = self.student.embed(video)
-        visible_ids, masked_ids = _ids_from_mask(mask)
-        visible_tokens = _gather_tokens(student_tokens, visible_ids)
-        visible_pos = _gather_tokens(pos, visible_ids)
-        masked_pos = _gather_tokens(pos, masked_ids)
-        visible_latents = self.student.forward_tokens(visible_tokens)
-        prediction = self.predictor(visible_latents, visible_pos, masked_pos)
-        target = _gather_tokens(teacher_tokens, masked_ids)
+        predictions: list[torch.Tensor] = []
+        targets: list[torch.Tensor] = []
+        for visible_ids, masked_ids in _mask_pairs(mask):
+            visible_tokens = _gather_tokens(student_tokens, visible_ids)
+            visible_pos = _gather_tokens(pos, visible_ids)
+            masked_pos = _gather_tokens(pos, masked_ids)
+            visible_latents = self.student.forward_tokens(visible_tokens)
+            predictions.append(self.predictor(visible_latents, visible_pos, masked_pos))
+            targets.append(_gather_tokens(teacher_tokens, masked_ids))
+        prediction = torch.cat(predictions, dim=1)
+        target = torch.cat(targets, dim=1)
         return ModelOutput(prediction=prediction, target=target, mask=mask)
