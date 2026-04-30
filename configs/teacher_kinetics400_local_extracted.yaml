@@ -1,4 +1,4 @@
-app: rethinking_jepa.train
+app: rethinking_jepa.teacher_train
 
 data:
   source: real

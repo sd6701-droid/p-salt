@@ -11,7 +11,7 @@ from .predictor import LatentPredictor, ReconstructionDecoder
 from .vision_transformer import VideoTransformerEncoder
 
 
-def _gather_tokens(tokens: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
+def get_related_tokens(tokens: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
     gather_idx = indices.unsqueeze(-1).expand(-1, -1, tokens.size(-1))
     return tokens.gather(dim=1, index=gather_idx)
 
@@ -123,12 +123,12 @@ class TeacherModel(nn.Module):
         predictions: list[torch.Tensor] = []
         targets: list[torch.Tensor] = []
         for visible_ids, masked_ids in _mask_pairs(mask):
-            visible_tokens = _gather_tokens(tokens, visible_ids)
-            visible_pos = _gather_tokens(pos, visible_ids)
-            masked_pos = _gather_tokens(pos, masked_ids)
+            visible_tokens = get_related_tokens(tokens, visible_ids)
+            visible_pos = get_related_tokens(pos, visible_ids)
+            masked_pos = get_related_tokens(pos, masked_ids)
             visible_latents = self.encoder.forward_tokens(visible_tokens)
             predictions.append(self.decoder(visible_latents, visible_pos, masked_pos))
-            target = _gather_tokens(patches, masked_ids)
+            target = get_related_tokens(patches, masked_ids)
             if self.norm_pix_loss:
                 target = normalize_patch_targets(target, eps=self.norm_pix_eps)
             targets.append(target)
@@ -196,12 +196,12 @@ class StudentModel(nn.Module):
         predictions: list[torch.Tensor] = []
         targets: list[torch.Tensor] = []
         for visible_ids, masked_ids in _mask_pairs(mask):
-            visible_tokens = _gather_tokens(student_tokens, visible_ids)
-            visible_pos = _gather_tokens(pos, visible_ids)
-            masked_pos = _gather_tokens(pos, masked_ids)
+            visible_tokens = get_related_tokens(student_tokens, visible_ids)
+            visible_pos = get_related_tokens(pos, visible_ids)
+            masked_pos = get_related_tokens(pos, masked_ids)
             visible_latents = self.student.forward_tokens(visible_tokens)
             predictions.append(self.predictor(visible_latents, visible_pos, masked_pos))
-            targets.append(_gather_tokens(teacher_tokens, masked_ids))
+            targets.append(get_related_tokens(teacher_tokens, masked_ids))
         prediction = torch.cat(predictions, dim=1)
         target = torch.cat(targets, dim=1)
         return ModelOutput(prediction=prediction, target=target, mask=mask)

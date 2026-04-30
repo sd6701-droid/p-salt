@@ -10,7 +10,9 @@ from .video_dataset import (
     SyntheticVideoDataset,
     VIDEO_FILE_EXTENSIONS,
     VideoAugmentationConfig,
+    VideoDataset,
     VideoFileDataset,
+    make_videodataset,
     random_resized_crop_video,
 )
 
@@ -28,8 +30,10 @@ __all__ = [
     "SyntheticVideoDataset",
     "VIDEO_FILE_EXTENSIONS",
     "VideoAugmentationConfig",
+    "VideoDataset",
     "VideoFileDataset",
     "build_video_dataset",
+    "make_videodataset",
     "related_imagenet_labels_for_actions",
     "random_resized_crop_video",
 ]

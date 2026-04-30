@@ -18,7 +18,7 @@ def load_env_file(path: Path) -> None:
 
 load_env_file(Path(__file__).resolve().with_name(".env"))
 
-from app.rethinking_jepa.train import main
+from app.rethinking_jepa.teacher_train import main
 
 
 if __name__ == "__main__":

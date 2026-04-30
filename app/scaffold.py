@@ -11,7 +11,8 @@ APP_MODULES = {
     "rethinking_jepa.probe_student_imagenet": "app.rethinking_jepa.probe_student_imagenet",
     "rethinking_jepa.prepare_kinetics700_subset": "app.rethinking_jepa.prepare_kinetics700_subset",
     "rethinking_jepa.student": "app.rethinking_jepa.student",
-    "rethinking_jepa.teacher": "app.rethinking_jepa.train",
+    "rethinking_jepa.teacher": "app.rethinking_jepa.teacher_train",
+    "rethinking_jepa.teacher_train": "app.rethinking_jepa.teacher_train",
     "rethinking_jepa.train": "app.rethinking_jepa.train",
 }
 

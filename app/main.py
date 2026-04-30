@@ -38,7 +38,7 @@ def infer_app_name(config_path: str, cfg: dict) -> str:
     lowered = config_path.lower()
     if "student" in lowered:
         return "rethinking_jepa.student"
-    return "rethinking_jepa.train"
+    return "rethinking_jepa.teacher_train"
 
 
 def main() -> None:

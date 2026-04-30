@@ -912,6 +912,7 @@ class VideoDataset(Dataset[tuple[list[torch.Tensor], int, list[Any]]]):
         self.fps = fps
         self.sample_weights: list[float] | None = None
         self.num_samples_per_dataset: list[int] = []
+        self._dataset_ends: list[int] = []
 
         if isinstance(data_paths, (str, Path)):
             data_paths = [str(data_paths)]
@@ -937,15 +938,16 @@ class VideoDataset(Dataset[tuple[list[torch.Tensor], int, list[Any]]]):
                     if not line:
                         continue
                     parts = line.split()
-                    sample_path = parts[0]
+                    sample_path = self._resolve_sample_path(parts[0], p.parent)
                     label = int(parts[1]) if len(parts) > 1 and parts[1].lstrip("-").isdigit() else 0
                     rows.append((sample_path, label))
             else:
                 for line in p.read_text(encoding="utf-8").splitlines():
                     line = line.strip()
                     if line:
-                        rows.append((line, 0))
+                        rows.append((self._resolve_sample_path(line, p.parent), 0))
             self.num_samples_per_dataset.append(len(rows))
+            self._dataset_ends.append(len(samples) + len(rows))
             for sample_path, label in rows:
                 samples.append(sample_path)
                 labels.append(label)
@@ -961,30 +963,84 @@ class VideoDataset(Dataset[tuple[list[torch.Tensor], int, list[Any]]]):
         self.samples = samples
         self.labels = labels
 
+    @staticmethod
+    def _resolve_sample_path(sample_path: str, base_dir: Path) -> str:
+        path = Path(sample_path).expanduser()
+        if not path.is_absolute():
+            path = (base_dir / path).resolve()
+        return str(path)
+
+    def _dataset_index_for_sample(self, index: int) -> int:
+        for dataset_idx, end in enumerate(self._dataset_ends):
+            if index < end:
+                return dataset_idx
+        return max(0, len(self._dataset_ends) - 1)
+
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, index):
+        loaded_sample = None
+        original_index = index
+        while loaded_sample is None:
+            sample = self.samples[index]
+            if Path(sample).suffix.lower() in (".jpg", ".jpeg", ".png"):
+                loaded_sample = self.get_item_image(index)
+            else:
+                loaded_sample = self.get_item_video(index)
+            if loaded_sample is None:
+                index = random.randint(0, len(self.samples) - 1)
+                if index == original_index and len(self.samples) > 1:
+                    index = (index + 1) % len(self.samples)
+        return loaded_sample
+
+    def get_item_video(self, index: int):
         sample = self.samples[index]
-        clip = _read_video_clip(sample, frames=self.dataset_fpcs[0], frame_step=self.frame_step)
-        video = clip.float() / 255.0  # [T,H,W,C]
+        if not os.path.exists(sample):
+            return None
+        if os.path.getsize(sample) > self.filter_long_videos:
+            return None
+
+        try:
+            video = _read_video_frames(sample).float() / 255.0  # [T,H,W,C]
+        except Exception:
+            return None
+
         total_frames = int(video.size(0))
-        fpc = int(self.dataset_fpcs[0])
-        clip_span = fpc * self.frame_step
+        dataset_idx = self._dataset_index_for_sample(index)
+        fpc = int(self.dataset_fpcs[dataset_idx])
+        fstp = int(self.frame_step or 1)
+        clip_span = fpc * fstp
+        if self.filter_short_videos and total_frames < clip_span:
+            return None
+
         clips: list[torch.Tensor] = []
         clip_indices: list[Any] = []
+        partition_len = max(1, total_frames // self.num_clips)
         for clip_idx in range(self.num_clips):
-            if total_frames >= clip_span:
-                max_start = max(0, total_frames - clip_span)
+            partition_start = clip_idx * partition_len
+            partition_end = total_frames if clip_idx == self.num_clips - 1 else min(total_frames, partition_start + partition_len)
+            available = max(1, partition_end - partition_start)
+
+            if available >= clip_span:
+                max_start = available - clip_span
                 if self.random_clip_sampling:
-                    start = 0 if max_start == 0 else random.randint(0, max_start)
+                    local_start = 0 if max_start == 0 else random.randint(0, max_start)
                 else:
-                    start = 0 if self.num_clips == 1 else int(round((max_start * clip_idx) / (self.num_clips - 1)))
-                indices = list(range(start, start + clip_span, self.frame_step))
+                    local_start = 0
+                start = partition_start + local_start
+                indices = list(range(start, start + clip_span, fstp))[:fpc]
             else:
-                if self.filter_short_videos:
-                    raise ValueError(f"Video too short for requested clip span: {sample}")
-                indices = torch.linspace(0, max(total_frames - 1, 0), fpc).round().long().tolist()
+                if not self.allow_clip_overlap and self.num_clips > 1:
+                    local_indices = torch.linspace(0, available - 1, fpc).round().long().tolist()
+                    indices = [partition_start + int(i) for i in local_indices]
+                else:
+                    sample_len = min(clip_span, total_frames)
+                    local_indices = torch.linspace(0, max(sample_len - 1, 0), fpc).round().long().tolist()
+                    max_start = max(0, total_frames - sample_len)
+                    start = 0 if self.num_clips == 1 else min(max_start, clip_idx * max(1, max_start // max(1, self.num_clips - 1)))
+                    indices = [start + int(i) for i in local_indices]
+
             clip_indices.append(indices)
             clip_t = video.index_select(0, torch.tensor(indices, dtype=torch.long))
             if self.shared_transform is not None:
@@ -993,6 +1049,25 @@ class VideoDataset(Dataset[tuple[list[torch.Tensor], int, list[Any]]]):
                 clip_t = self.transform(clip_t)
             clips.append(clip_t)
         return clips, self.labels[index], clip_indices
+
+    def get_item_image(self, index: int):
+        sample = self.samples[index]
+        try:
+            from torchvision.io import ImageReadMode, read_image
+
+            image = read_image(sample, mode=ImageReadMode.RGB).permute(1, 2, 0)
+        except Exception:
+            return None
+
+        dataset_idx = self._dataset_index_for_sample(index)
+        fpc = int(self.dataset_fpcs[dataset_idx])
+        clip = image.unsqueeze(0).repeat(fpc, 1, 1, 1).float() / 255.0
+        clip_indices = [list(range(fpc))]
+        if self.shared_transform is not None:
+            clip = self.shared_transform(clip)
+        if self.transform is not None:
+            clip = self.transform(clip)
+        return [clip], self.labels[index], clip_indices
 
 
 def make_videodataset(
