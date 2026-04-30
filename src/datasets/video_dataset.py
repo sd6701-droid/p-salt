@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import urllib.request
 from dataclasses import dataclass
+from logging import getLogger
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from torch.utils.data import Dataset, IterableDataset
 DEFAULT_KINETICS700_TRAIN_ANNOTATION_URL = "https://s3.amazonaws.com/kinetics/700_2020/annotations/train.csv"
 VIDEO_FILE_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv", ".webm")
 SQUASHFS_FILE_EXTENSIONS = (".sqf", ".sqfs", ".squashfs")
+logger = getLogger(__name__)
 
 
 def _resolve_squashfs_tool(tool_name: str, explicit_path: str | Path | None = None) -> str | None:
@@ -235,6 +237,29 @@ def _read_video_clip(
     return video.index_select(0, torch.tensor(indices, dtype=torch.long))
 
 
+def _read_video_clip_with_decord(
+    path: str | Path,
+    *,
+    frames: int,
+    frame_step: int,
+) -> torch.Tensor | None:
+    try:
+        from decord import VideoReader, cpu
+    except ImportError:
+        return None
+
+    try:
+        vr = VideoReader(str(path), num_threads=-1, ctx=cpu(0))
+        total_frames = len(vr)
+        if total_frames <= 0:
+            return None
+        indices = _sample_frame_indices(total_frames, frames, frame_step)
+        batch = vr.get_batch(indices).asnumpy()
+        return torch.from_numpy(batch)
+    except Exception:
+        return None
+
+
 class SyntheticVideoDataset(Dataset[torch.Tensor]):
     def __init__(
         self,
@@ -400,6 +425,7 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
         self.frames = frames
         self.frame_step = frame_step
         self.image_size = image_size
+        # do we need any augmentations 
         self.augmentation = augmentation
         self.class_names = list(class_names) if class_names is not None else None
         self.class_fraction = class_fraction
@@ -407,7 +433,7 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
             int(max_samples_per_class) if max_samples_per_class is not None else None
         )
         self.cache_dir = Path(cache_dir).expanduser().resolve() if cache_dir is not None else None
-        self.unsquashfs_path = _resolve_squashfs_tool("unsquashfs", unsquashfs_path)
+        self.unsquashfs_path = _resolve_squashfs_tool("unsquashfs", unsquashfs_path)   #used tool to get the encoded videos (not need but we may need since scratch has limited size ?)
         self.sqfscat_path = _resolve_squashfs_tool("sqfscat", sqfscat_path)
         if self.cache_dir is not None:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -431,6 +457,7 @@ class SquashFSVideoDataset(Dataset[torch.Tensor]):
             rng.shuffle(archive_entries)
             self.archive_entries = archive_entries[: int(max_samples)]
 
+ # it lists all video files inside a SquashFS archive (and sorted them for further decod)
     def _list_video_entries(self) -> list[str]:
         if self.unsquashfs_path is None:
             raise RuntimeError(
@@ -850,3 +877,181 @@ class HuggingFaceVideoDataset(IterableDataset[torch.Tensor]):
                 "No clips were yielded from the Hugging Face dataset. "
                 "Check your class filter, annotation mapping, and video decoding environment."
             )
+
+
+class VideoDataset(Dataset[tuple[list[torch.Tensor], int, list[Any]]]):
+    """V-JEPA-style dataset that returns (clips, label, clip_indices)."""
+
+    def __init__(
+        self,
+        data_paths,
+        datasets_weights=None,
+        frames_per_clip=16,
+        fps=None,
+        dataset_fpcs=None,
+        frame_step=4,
+        num_clips=1,
+        transform=None,
+        shared_transform=None,
+        random_clip_sampling=True,
+        allow_clip_overlap=False,
+        filter_short_videos=False,
+        filter_long_videos=int(10**9),
+        duration=None,
+    ) -> None:
+        self.datasets_weights = datasets_weights
+        self.frame_step = frame_step
+        self.num_clips = num_clips
+        self.transform = transform
+        self.shared_transform = shared_transform
+        self.random_clip_sampling = random_clip_sampling
+        self.allow_clip_overlap = allow_clip_overlap
+        self.filter_short_videos = filter_short_videos
+        self.filter_long_videos = filter_long_videos
+        self.duration = duration
+        self.fps = fps
+        self.sample_weights: list[float] | None = None
+        self.num_samples_per_dataset: list[int] = []
+
+        if isinstance(data_paths, (str, Path)):
+            data_paths = [str(data_paths)]
+        self.data_paths = list(data_paths)
+        self.dataset_fpcs = (
+            [int(frames_per_clip) for _ in self.data_paths]
+            if dataset_fpcs is None
+            else [int(v) for v in dataset_fpcs]
+        )
+        if len(self.dataset_fpcs) != len(self.data_paths):
+            raise ValueError("dataset_fpcs must match the number of data_paths")
+        if self.num_clips < 1:
+            raise ValueError("num_clips must be >= 1")
+
+        samples: list[str] = []
+        labels: list[int] = []
+        for path in self.data_paths:
+            p = Path(path).expanduser()
+            rows: list[tuple[str, int]] = []
+            if p.suffix.lower() == ".csv":
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split()
+                    sample_path = parts[0]
+                    label = int(parts[1]) if len(parts) > 1 and parts[1].lstrip("-").isdigit() else 0
+                    rows.append((sample_path, label))
+            else:
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line:
+                        rows.append((line, 0))
+            self.num_samples_per_dataset.append(len(rows))
+            for sample_path, label in rows:
+                samples.append(sample_path)
+                labels.append(label)
+
+        if not samples:
+            raise ValueError("VideoDataset received no samples from data_paths")
+        if self.datasets_weights is not None:
+            if len(self.datasets_weights) != len(self.num_samples_per_dataset):
+                raise ValueError("datasets_weights length must match data_paths length")
+            self.sample_weights = []
+            for dw, ns in zip(self.datasets_weights, self.num_samples_per_dataset, strict=True):
+                self.sample_weights.extend([float(dw) / max(ns, 1)] * ns)
+        self.samples = samples
+        self.labels = labels
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, index):
+        sample = self.samples[index]
+        clip = _read_video_clip(sample, frames=self.dataset_fpcs[0], frame_step=self.frame_step)
+        video = clip.float() / 255.0  # [T,H,W,C]
+        total_frames = int(video.size(0))
+        fpc = int(self.dataset_fpcs[0])
+        clip_span = fpc * self.frame_step
+        clips: list[torch.Tensor] = []
+        clip_indices: list[Any] = []
+        for clip_idx in range(self.num_clips):
+            if total_frames >= clip_span:
+                max_start = max(0, total_frames - clip_span)
+                if self.random_clip_sampling:
+                    start = 0 if max_start == 0 else random.randint(0, max_start)
+                else:
+                    start = 0 if self.num_clips == 1 else int(round((max_start * clip_idx) / (self.num_clips - 1)))
+                indices = list(range(start, start + clip_span, self.frame_step))
+            else:
+                if self.filter_short_videos:
+                    raise ValueError(f"Video too short for requested clip span: {sample}")
+                indices = torch.linspace(0, max(total_frames - 1, 0), fpc).round().long().tolist()
+            clip_indices.append(indices)
+            clip_t = video.index_select(0, torch.tensor(indices, dtype=torch.long))
+            if self.shared_transform is not None:
+                clip_t = self.shared_transform(clip_t)
+            if self.transform is not None:
+                clip_t = self.transform(clip_t)
+            clips.append(clip_t)
+        return clips, self.labels[index], clip_indices
+
+
+def make_videodataset(
+    data_paths,
+    batch_size,
+    frames_per_clip=8,
+    dataset_fpcs=None,
+    frame_step=4,
+    duration=None,
+    fps=None,
+    num_clips=1,
+    random_clip_sampling=True,
+    allow_clip_overlap=False,
+    filter_short_videos=False,
+    filter_long_videos=int(10**9),
+    transform=None,
+    shared_transform=None,
+    rank=0,
+    world_size=1,
+    datasets_weights=None,
+    collator=None,
+    drop_last=True,
+    num_workers=10,
+    pin_mem=True,
+    persistent_workers=True,
+    deterministic=True,
+    log_dir=None,
+):
+    dataset = VideoDataset(
+        data_paths=data_paths,
+        datasets_weights=datasets_weights,
+        frames_per_clip=frames_per_clip,
+        dataset_fpcs=dataset_fpcs,
+        duration=duration,
+        fps=fps,
+        frame_step=frame_step,
+        num_clips=num_clips,
+        random_clip_sampling=random_clip_sampling,
+        allow_clip_overlap=allow_clip_overlap,
+        filter_short_videos=filter_short_videos,
+        filter_long_videos=filter_long_videos,
+        shared_transform=shared_transform,
+        transform=transform,
+    )
+    if log_dir:
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
+    logger.info("VideoDataset dataset created")
+    dist_sampler = torch.utils.data.distributed.DistributedSampler(
+        dataset, num_replicas=world_size, rank=rank, shuffle=True
+    )
+    data_loader = torch.utils.data.DataLoader(
+        dataset,
+        collate_fn=collator,
+        sampler=dist_sampler,
+        batch_size=batch_size,
+        drop_last=drop_last,
+        pin_memory=pin_mem,
+        num_workers=num_workers,
+        persistent_workers=(num_workers > 0) and persistent_workers,
+    )
+    logger.info("VideoDataset unsupervised data loader created")
+    return dataset, data_loader, dist_sampler

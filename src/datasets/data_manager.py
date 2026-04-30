@@ -55,6 +55,7 @@ def _collect_video_paths(dataset_cfg: dict[str, Any]) -> list[Path]:
     if not paths:
         raise ValueError(f"No videos found for dataset config: {dataset_cfg}")
 
+    #just used to max_limit only if the param is set 
     max_samples = dataset_cfg.get("max_samples")
     if max_samples is not None:
         sample_seed = int(dataset_cfg.get("sample_seed", 0))
@@ -81,10 +82,11 @@ def _dataset_common_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
 
 def build_video_dataset(cfg: dict[str, Any]) -> Dataset[torch.Tensor]:
     data_cfg = cfg["data"]
-    common_kwargs = _dataset_common_kwargs(cfg)
-    source = data_cfg.get("source", "synthetic")
+    common_kwargs = _dataset_common_kwargs(cfg) 
+    source = data_cfg.get("source", "synthetic")  # getting the location where the data stored.
 
     if source == "synthetic":
+        # this was used for testing 
         return SyntheticVideoDataset(
             num_samples=data_cfg["num_samples"],
             height=data_cfg["image_size"],
@@ -94,6 +96,7 @@ def build_video_dataset(cfg: dict[str, Any]) -> Dataset[torch.Tensor]:
 
     if source == "real":
         root = data_cfg.get("root")
+        # below if is triggered if only we use the path to squash folder(i.ee we use path of sqash)
         if root and Path(root).expanduser().suffix.lower() in SQUASHFS_FILE_EXTENSIONS:
             return SquashFSVideoDataset(
                 archive_path=root,

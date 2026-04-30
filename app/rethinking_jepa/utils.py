@@ -22,7 +22,7 @@ from src.masks.types import (
     mask_visible_tokens_per_sample,
     mask_visible_tokens_total,
 )
-from src.masks.vjepa_exact import VJEPAMultiMaskSampler
+from src.masks.vjepa_style_masking import VJEPAMultiMaskSampler
 from src.models.architectures import resolve_model_config
 from src.models.dinov2_init import initialize_video_encoder_from_dinov2
 from src.models.jepa import StudentModel, TeacherModel
@@ -31,7 +31,7 @@ from src.utils.schedulers import CosineScheduler
 
 def resolve_device() -> torch.device:
     if torch.cuda.is_available():
-        return torch.device("cuda")
+        return torch.device("cuda")  #switching to gpu usage 
     if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")

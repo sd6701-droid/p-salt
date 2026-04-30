@@ -151,7 +151,7 @@ def _mean_std_from_sums(sum_value: float, sumsq_value: float, count: int) -> tup
 
 
 def run(cfg: dict) -> None:
-    device = resolve_device()
+    device = resolve_device()  
     model, _ = build_teacher_from_cfg(cfg, device)
     loader = build_loader(cfg)
     device_batch_size, accumulation_steps, effective_batch_size = resolve_batch_settings(cfg)
