@@ -175,6 +175,38 @@ def mask_view_names(mask_cfgs: list[dict[str, Any]]) -> list[str]:
     return [f"view_{idx}" for idx in range(len(mask_cfgs))]
 
 
+class VideoTrainTransform:
+    def __init__(
+        self,
+        *,
+        input_size: int,
+        channels: int,
+        augmentation: VideoAugmentationConfig | None,
+    ) -> None:
+        self.input_size = input_size
+        self.channels = channels
+        self.augmentation = augmentation
+
+    def __call__(self, clip: torch.Tensor) -> torch.Tensor:
+        if clip.ndim != 4:
+            raise ValueError(f"Expected clip with 4 dims, got shape={tuple(clip.shape)}")
+        if clip.size(-1) in {1, 3, self.channels}:
+            clip = clip.permute(3, 0, 1, 2).contiguous()
+        if clip.size(0) == 1 and self.channels == 3:
+            clip = clip.expand(3, -1, -1, -1)
+        if clip.size(0) != self.channels:
+            raise ValueError(f"Expected {self.channels} channels, got {clip.size(0)}")
+        if self.augmentation is not None:
+            return random_resized_crop_video(clip, self.augmentation)
+        resized = F.interpolate(
+            clip.permute(1, 0, 2, 3),
+            size=(self.input_size, self.input_size),
+            mode="bilinear",
+            align_corners=False,
+        )
+        return resized.permute(1, 0, 2, 3).contiguous()
+
+
 def build_video_transform(cfg: dict[str, Any]):
     data_cfg = cfg["data"]
     model_cfg = cfg["model"]
@@ -188,27 +220,11 @@ def build_video_transform(cfg: dict[str, Any]):
             random_resize_aspect_ratio=tuple(aug_cfg["random_resize_aspect_ratio"]),
             random_resize_scale=tuple(aug_cfg["random_resize_scale"]),
         )
-
-    def transform(clip: torch.Tensor) -> torch.Tensor:
-        if clip.ndim != 4:
-            raise ValueError(f"Expected clip with 4 dims, got shape={tuple(clip.shape)}")
-        if clip.size(-1) in {1, 3, channels}:
-            clip = clip.permute(3, 0, 1, 2).contiguous()
-        if clip.size(0) == 1 and channels == 3:
-            clip = clip.expand(3, -1, -1, -1)
-        if clip.size(0) != channels:
-            raise ValueError(f"Expected {channels} channels, got {clip.size(0)}")
-        if augmentation is not None:
-            return random_resized_crop_video(clip, augmentation)
-        resized = F.interpolate(
-            clip.permute(1, 0, 2, 3),
-            size=(input_size, input_size),
-            mode="bilinear",
-            align_corners=False,
-        )
-        return resized.permute(1, 0, 2, 3).contiguous()
-
-    return transform
+    return VideoTrainTransform(
+        input_size=input_size,
+        channels=channels,
+        augmentation=augmentation,
+    )
 
 
 def maybe_compile_model(model: nn.Module, enabled: bool) -> nn.Module:
