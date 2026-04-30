@@ -248,6 +248,7 @@ def run(cfg: dict) -> None:
     accumulated_prediction_token_norm_sum = 0.0
     accumulated_cosine_similarity_sum = 0.0
     accumulated_token_count = 0
+    accumulated_predictions: list[torch.Tensor] = []
 
     while step < max_steps:
         epoch += 1
@@ -301,6 +302,7 @@ def run(cfg: dict) -> None:
                 F.cosine_similarity(prediction_for_loss, target_for_loss, dim=-1).sum().item()
             )
             accumulated_token_count += token_count
+            accumulated_predictions.append(prediction_for_loss.detach())
 
             if accumulation_count < accumulation_steps:
                 continue
@@ -316,6 +318,9 @@ def run(cfg: dict) -> None:
                 accumulated_prediction_sumsq,
                 accumulated_prediction_numel,
             )
+            if accumulated_predictions:
+                z = torch.cat(accumulated_predictions, dim=0)
+                prediction_std = float(z.std(dim=0, unbiased=False).mean().item())
             diagnostics = {
                 "target_mean": target_mean,
                 "target_std": target_std,
@@ -430,6 +435,7 @@ def run(cfg: dict) -> None:
             accumulated_prediction_token_norm_sum = 0.0
             accumulated_cosine_similarity_sum = 0.0
             accumulated_token_count = 0
+            accumulated_predictions = []
             if step >= max_steps:
                 break
 
