@@ -258,6 +258,45 @@ def iter_collations(batch: Any):
         yield batch
 
 
+def _tensor_preview(tensor: torch.Tensor, max_items: int = 8) -> list[Any]:
+    preview = tensor.detach().cpu().reshape(-1)[:max_items].tolist()
+    return [int(value) if isinstance(value, (int, bool)) else value for value in preview]
+
+
+def _mask_preview(mask: torch.Tensor, max_items: int = 8) -> list[Any]:
+    sample = mask[0] if mask.ndim > 1 else mask
+    return _tensor_preview(sample, max_items=max_items)
+
+
+def format_mask_collator_output(
+    collated_batch: Any,
+    masks_enc: list[torch.Tensor],
+    masks_pred: list[torch.Tensor],
+) -> str:
+    video = video_from_collated_batch(collated_batch)
+    lines = [
+        "mask_collator output",
+        f"  collated_batch_type={type(collated_batch).__name__}",
+        f"  video_shape={tuple(video.shape)} video_dtype={video.dtype}",
+        f"  mask_views={len(masks_pred)}",
+    ]
+    if isinstance(collated_batch, (list, tuple)) and len(collated_batch) > 1:
+        labels = collated_batch[1]
+        if torch.is_tensor(labels):
+            lines.append(f"  labels_shape={tuple(labels.shape)} labels_dtype={labels.dtype}")
+        else:
+            lines.append(f"  labels_type={type(labels).__name__}")
+
+    for view_idx in range(max(len(masks_enc), len(masks_pred))):
+        enc = masks_enc[view_idx] if view_idx < len(masks_enc) else None
+        pred = masks_pred[view_idx] if view_idx < len(masks_pred) else None
+        enc_desc = "missing" if enc is None else f"shape={tuple(enc.shape)} preview={_mask_preview(enc)}"
+        pred_desc = "missing" if pred is None else f"shape={tuple(pred.shape)} preview={_mask_preview(pred)}"
+        lines.append(f"  view_{view_idx} encoder_visible={enc_desc}")
+        lines.append(f"  view_{view_idx} predictor_masked={pred_desc}")
+    return "\n".join(lines)
+
+
 def build_indexed_mask(
     *,
     masks_enc: list[torch.Tensor],
@@ -381,7 +420,7 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
         patch_size=(int(cfg["model"]["patch_size"]), int(cfg["model"]["patch_size"])),
         tubelet_size=int(cfg["model"]["tubelet_size"]),
     )
-    
+
     data_loader, dist_sampler = init_data(
         batch_size=int(train_cfg["device_batch_size"]),
         transform=build_video_transform(cfg),
@@ -515,6 +554,7 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
     accumulated_prediction_sumsq = 0.0
     accumulated_prediction_numel = 0
     last_loss = float("nan")
+    printed_mask_collator_output = False
 
     while step < max_steps:
         epoch += 1
@@ -525,6 +565,12 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
             if step >= max_steps:
                 break
             for collated_batch, masks_enc_cpu, masks_pred_cpu in iter_collations(batch):
+                if is_main and not printed_mask_collator_output:
+                    print(
+                        format_mask_collator_output(collated_batch, masks_enc_cpu, masks_pred_cpu),
+                        flush=True,
+                    )
+                    printed_mask_collator_output = True
                 video = video_from_collated_batch(collated_batch).to(device, non_blocking=(device.type == "cuda"))
                 masks_enc = move_masks(masks_enc_cpu, device)
                 masks_pred = move_masks(masks_pred_cpu, device)
