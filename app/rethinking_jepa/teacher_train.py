@@ -310,6 +310,7 @@ def mask_stats(video: torch.Tensor, masks_enc: list[torch.Tensor], masks_pred: l
     batch_size = int(video.size(0))
     visible_by_view = [int(mask.size(1)) for mask in masks_enc]
     prediction_by_view = [int(mask.size(1)) for mask in masks_pred]
+    mask_ratio_by_view = [prediction_tokens / max(tokens, 1) for prediction_tokens in prediction_by_view]
     prediction_tokens_per_sample = int(sum(prediction_by_view))
     visible_tokens_per_sample = int(sum(visible_by_view))
     mask_views = len(masks_pred)
@@ -324,6 +325,7 @@ def mask_stats(video: torch.Tensor, masks_enc: list[torch.Tensor], masks_pred: l
         "tokens_prediction_by_view": prediction_by_view,
         "tokens_visible_per_sample": visible_tokens_per_sample,
         "tokens_visible_by_view": visible_by_view,
+        "mask_ratio_by_view": mask_ratio_by_view,
         "mask_ratio": prediction_tokens / max(total_tokens, 1),
         "prediction_tokens_per_batch": prediction_tokens,
         "visible_tokens_per_batch": visible_tokens,
@@ -421,6 +423,7 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
         tubelet_size=int(cfg["model"]["tubelet_size"]),
     )
 
+    print('mask_collator--->', mask_collator)
     data_loader, dist_sampler = init_data(
         batch_size=int(train_cfg["device_batch_size"]),
         transform=build_video_transform(cfg),
@@ -478,6 +481,8 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
             "weight_decay",
             "mask_strategy",
             "mask_ratio",
+            "mask_short_ratio",
+            "mask_long_ratio",
             "mask_views",
             "tokens_total_per_sample",
             "tokens_visible_per_sample",
@@ -640,9 +645,12 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
                         named_mask_metrics[f"train/mask_{view_name}_visible_tokens_per_sample"] = visible_tokens
                     for view_idx, prediction_tokens in enumerate(stats["tokens_prediction_by_view"]):
                         view_name = view_names[view_idx] if view_idx < len(view_names) else f"view_{view_idx}"
+                        mask_ratio = float(stats["mask_ratio_by_view"][view_idx])
                         mask_view_metrics[f"train/mask_view_{view_idx}_prediction_tokens_per_sample"] = prediction_tokens
+                        mask_view_metrics[f"train/mask_view_{view_idx}_ratio"] = mask_ratio
                         named_mask_metrics[f"train/mask_{view_name}_masked_tokens_per_sample"] = prediction_tokens
                         named_mask_metrics[f"train/mask_{view_name}_prediction_tokens_per_sample"] = prediction_tokens
+                        named_mask_metrics[f"train/mask_{view_name}_ratio"] = mask_ratio
                     metrics = {
                         "step": step,
                         "epoch": epoch,
@@ -651,6 +659,8 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
                         "weight_decay": float(wd),
                         "mask_strategy": strategy_name,
                         "mask_ratio": float(stats["mask_ratio"]),
+                        "mask_short_ratio": named_mask_metrics.get("train/mask_short_ratio", ""),
+                        "mask_long_ratio": named_mask_metrics.get("train/mask_long_ratio", ""),
                         "mask_views": int(stats["mask_views"]),
                         "tokens_total_per_sample": int(stats["tokens_total_per_sample"]),
                         "tokens_visible_per_sample": int(stats["tokens_visible_per_sample"]),
@@ -683,6 +693,8 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
                         f"lr={lr:.7f} wd={wd:.4f} "
                         f"mask_strategy={strategy_name} "
                         f"mask_ratio={stats['mask_ratio']:.6f} "
+                        f"short_ratio={named_mask_metrics.get('train/mask_short_ratio', 'n/a')} "
+                        f"long_ratio={named_mask_metrics.get('train/mask_long_ratio', 'n/a')} "
                         f"visible_tokens_per_sample={stats['tokens_visible_per_sample']} "
                         f"prediction_tokens_per_sample={stats['tokens_prediction_per_sample']} "
                         f"short_masked={named_mask_metrics.get('train/mask_short_masked_tokens_per_sample', 'n/a')} "
