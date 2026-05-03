@@ -1,0 +1,21 @@
+app: rethinking_jepa.linear_probe_teacher
+
+data:
+  source: real
+  manifest: /scratch/sd6701/salt/p-salt/data/kinetics400_subset_2/train_256_manifest.txt
+  skip_decode_errors: true
+  max_decode_attempts: 32
+  log_decode_warnings: true
+  frames: 16
+  frame_step: 4
+  image_size: 256
+  input_size: 224
+
+model:
+  architecture: vit_small
+  in_channels: 3
+  tubelet_size: 2
+  patch_size: 16
+
+train:
+  teacher_checkpoint: /scratch/sd6701/salt/p-salt/results/checkpoints/ba0e9395/best/checkpoint.pth
