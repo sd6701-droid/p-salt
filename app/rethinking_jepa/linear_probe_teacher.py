@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import torch
@@ -21,12 +22,93 @@ from app.rethinking_jepa.utils import build_teacher_from_cfg, resolve_device
 from src.utils import load_config
 
 
+def _strip_module_prefix(key: str) -> str:
+    return key.removeprefix("module.")
+
+
+def _looks_like_state_dict(value: object) -> bool:
+    return isinstance(value, Mapping) and all(isinstance(key, str) for key in value)
+
+
+def _state_dict_from_checkpoint(checkpoint: object) -> Mapping[str, object]:
+    if not isinstance(checkpoint, Mapping):
+        raise TypeError(f"Expected checkpoint mapping, got {type(checkpoint).__name__}")
+    for key in ("model", "state_dict", "teacher", "teacher_state_dict"):
+        value = checkpoint.get(key)
+        if _looks_like_state_dict(value):
+            return value
+    if _looks_like_state_dict(checkpoint):
+        return checkpoint
+    raise TypeError("Could not find a state_dict-like mapping in checkpoint")
+
+
+def _encoder_state_from_state_dict(state_dict: Mapping[str, object]) -> dict[str, object]:
+    encoder_state: dict[str, object] = {}
+    direct_encoder_prefixes = ("patch_embed.", "blocks.", "norm.")
+    direct_encoder_keys = {"pos_embed"}
+    for key, value in state_dict.items():
+        normalized_key = _strip_module_prefix(key)
+        if normalized_key.startswith("encoder."):
+            encoder_state[normalized_key.removeprefix("encoder.")] = value
+        elif normalized_key.startswith(direct_encoder_prefixes) or normalized_key in direct_encoder_keys:
+            encoder_state[normalized_key] = value
+    return encoder_state
+
+
+def _value_summary(value: object) -> str:
+    if torch.is_tensor(value):
+        return f"shape={tuple(value.shape)} dtype={value.dtype}"
+    return type(value).__name__
+
+
+def print_encoder_checkpoint_summary(
+    checkpoint_path: Path,
+    state_dict: Mapping[str, object],
+    encoder_state: Mapping[str, object],
+    *,
+    max_keys: int = 12,
+) -> None:
+    state_keys = list(state_dict.keys())
+    encoder_keys = list(encoder_state.keys())
+    print("teacher checkpoint summary")
+    print(f"  path={checkpoint_path}")
+    print(f"  total_state_keys={len(state_keys)}")
+    print(f"  encoder_keys={len(encoder_keys)} encoder_weights_present={bool(encoder_keys)}")
+    if encoder_keys:
+        print("  encoder_key_preview:")
+        for key in encoder_keys[:max_keys]:
+            print(f"    {key}: {_value_summary(encoder_state[key])}")
+    else:
+        print("  no encoder keys found; checkpoint key preview:")
+        for key in state_keys[:max_keys]:
+            print(f"    {key}: {_value_summary(state_dict[key])}")
+
+
+def print_load_result_summary(load_result: torch.nn.modules.module._IncompatibleKeys) -> None:
+    missing = list(load_result.missing_keys)
+    unexpected = list(load_result.unexpected_keys)
+    print("teacher encoder load summary")
+    print(f"  missing_keys={len(missing)} unexpected_keys={len(unexpected)}")
+    if missing:
+        print(f"  missing_key_preview={missing[:12]}")
+    if unexpected:
+        print(f"  unexpected_key_preview={unexpected[:12]}")
+
+
 def load_frozen_teacher_encoder(cfg: dict, device: torch.device) -> nn.Module:
     teacher, _ = build_teacher_from_cfg(cfg, device)
-    teacher.load_state_dict(
-        torch.load(cfg["train"]["teacher_checkpoint"], map_location=device)
-    )
+    checkpoint_path = Path(cfg["train"]["teacher_checkpoint"]).expanduser()
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    state_dict = _state_dict_from_checkpoint(checkpoint)
+    encoder_state = _encoder_state_from_state_dict(state_dict)
+    print_encoder_checkpoint_summary(checkpoint_path, state_dict, encoder_state)
     encoder = teacher.encoder
+    if not encoder_state:
+        raise RuntimeError("Teacher checkpoint does not contain encoder weights")
+    load_result = encoder.load_state_dict(encoder_state, strict=False)
+    print_load_result_summary(load_result)
+    if load_result.missing_keys:
+        raise RuntimeError("Teacher encoder checkpoint is missing expected encoder weights")
     encoder.eval()
     for p in encoder.parameters():
         p.requires_grad_(False)
