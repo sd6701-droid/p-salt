@@ -12,10 +12,12 @@ import sys
 from pathlib import Path
 
 import torch
+from torch import nn
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from app.rethinking_jepa.utils import build_teacher_from_cfg, resolve_device
 from src.utils import load_config
 
 
@@ -37,6 +39,34 @@ def print_keys(name: str, value: object) -> None:
             print(f"  {key}")
 
 
+def extract_model_state_dict(ckpt: object) -> dict[str, torch.Tensor]:
+    if isinstance(ckpt, dict) and "model" in ckpt and isinstance(ckpt["model"], dict):
+        return ckpt["model"]
+    if isinstance(ckpt, dict) and "state_dict" in ckpt and isinstance(ckpt["state_dict"], dict):
+        return ckpt["state_dict"]
+    if isinstance(ckpt, dict):
+        return ckpt
+    raise TypeError(f"Unsupported checkpoint format: {type(ckpt)!r}")
+
+
+def load_frozen_teacher_encoder(
+    cfg: dict,
+    device: torch.device,
+    *,
+    checkpoint_path: Path | None = None,
+) -> nn.Module:
+    teacher, _ = build_teacher_from_cfg(cfg, device)
+    if checkpoint_path is None:
+        checkpoint_path = Path(cfg["train"]["teacher_checkpoint"]).expanduser()
+    ckpt = torch.load(checkpoint_path, map_location=device)
+    teacher.load_state_dict(extract_model_state_dict(ckpt))
+    encoder = teacher.encoder
+    encoder.eval()
+    for p in encoder.parameters():
+        p.requires_grad_(False)
+    return encoder
+
+
 def main(cfg: dict | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, default=None)
@@ -45,16 +75,26 @@ def main(cfg: dict | None = None) -> None:
         checkpoint=None,
         config=None,
     )
+    if cfg is None and args.config:
+        cfg = load_config(args.config)
     checkpoint_path = Path(cfg["train"]["teacher_checkpoint"]).expanduser() if cfg is not None else checkpoint_path_from_args(args)
 
     print(f"checkpoint_path={checkpoint_path}")
     ckpt = torch.load(checkpoint_path, map_location="cpu")
     print_keys("ckpt", ckpt)
 
-    if isinstance(ckpt, dict):
-        for nested_key in ("model", "state_dict", "teacher", "teacher_state_dict"):
-            if nested_key in ckpt:
-                print_keys(f"ckpt['{nested_key}']", ckpt[nested_key])
+    if cfg is None:
+        return
+
+    device = resolve_device()
+    encoder = load_frozen_teacher_encoder(cfg, device, checkpoint_path=checkpoint_path)
+    num_params = sum(p.numel() for p in encoder.parameters())
+    print(
+        "linear-probe teacher: encoder loaded "
+        f"device={device} embed_dim={encoder.embed_dim} "
+        f"patch_size={encoder.patch_size} tubelet_size={encoder.tubelet_size} "
+        f"params={num_params}"
+    )
 
 
 if __name__ == "__main__":
