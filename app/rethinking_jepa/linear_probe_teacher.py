@@ -46,11 +46,12 @@ def run(cfg: dict) -> None:
     # Step 2-6: TODO
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True, type=str)
-    args = parser.parse_args()
-    cfg = load_config(args.config)
+def main(cfg: dict | None = None) -> None:
+    if cfg is None:
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--config", required=True, type=str)
+        args = parser.parse_args()
+        cfg = load_config(args.config)
     run(cfg)
 
 
