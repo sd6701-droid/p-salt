@@ -55,6 +55,7 @@ def load_frozen_teacher_encoder(
     *,
     checkpoint_path: Path | None = None,
 ) -> nn.Module:
+    # this build a teacher skeleton after which we load wts to this 
     teacher, _ = build_teacher_from_cfg(cfg, device)
     if checkpoint_path is None:
         checkpoint_path = Path(cfg["train"]["teacher_checkpoint"]).expanduser()
@@ -62,6 +63,7 @@ def load_frozen_teacher_encoder(
     teacher.load_state_dict(extract_model_state_dict(ckpt))
     encoder = teacher.encoder
     encoder.eval()
+    # for every params in the encoder we stop the flow of the gradients 
     for p in encoder.parameters():
         p.requires_grad_(False)
     return encoder
@@ -80,13 +82,15 @@ def main(cfg: dict | None = None) -> None:
     checkpoint_path = Path(cfg["train"]["teacher_checkpoint"]).expanduser() if cfg is not None else checkpoint_path_from_args(args)
 
     print(f"checkpoint_path={checkpoint_path}")
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
-    print_keys("ckpt", ckpt)
+    # ckpt = torch.load(checkpoint_path, map_location="cpu")
+    #print_keys("ckpt", ckpt)
 
     if cfg is None:
         return
 
+    #check which device we are using //cpu, apple gpu, gpu
     device = resolve_device()
+    # load the frozen encoder 
     encoder = load_frozen_teacher_encoder(cfg, device, checkpoint_path=checkpoint_path)
     num_params = sum(p.numel() for p in encoder.parameters())
     print(
