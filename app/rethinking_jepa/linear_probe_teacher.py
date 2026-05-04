@@ -218,13 +218,73 @@ def extract_features(
     video: torch.Tensor,
     device: torch.device,
 ) -> torch.Tensor:
-    # encoder is already eval() + requires_grad_(False); inference_mode skips
-    # autograd bookkeeping entirely. Mean over the token dim collapses
-    # (B, N, D) -> (B, D), one vector per video.
+    # encoder is already eval() + requires_grad_(False); no_grad keeps the
+    # output usable as a leaf input to the trainable linear head's autograd
+    # graph. Mean over the token dim collapses (B, N, D) -> (B, D).
     video = video.to(device, non_blocking=(device.type == "cuda"))
-    with torch.inference_mode():
+    with torch.no_grad():
         tokens, _ = encoder(video)
     return tokens.mean(dim=1)
+
+
+def build_linear_head(embed_dim: int, num_classes: int, device: torch.device) -> nn.Linear:
+    head = nn.Linear(embed_dim, num_classes)
+    return head.to(device)
+
+
+def build_probe_optimizer(
+    head: nn.Module,
+    probe_cfg: dict,
+    *,
+    steps_per_epoch: int,
+    epochs: int,
+) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.CosineAnnealingLR]:
+    optimizer = torch.optim.SGD(
+        head.parameters(),
+        lr=float(probe_cfg.get("lr", 0.1)),
+        momentum=float(probe_cfg.get("momentum", 0.9)),
+        weight_decay=float(probe_cfg.get("weight_decay", 0.0)),
+    )
+    total_steps = max(1, steps_per_epoch * epochs)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
+    return optimizer, scheduler
+
+
+def train_one_epoch(
+    encoder: nn.Module,
+    head: nn.Module,
+    loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    criterion: nn.Module,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    device: torch.device,
+) -> dict[str, float]:
+    head.train()
+    loss_sum = 0.0
+    correct = 0
+    seen = 0
+    for video, labels in loader:
+        labels = labels.to(device, non_blocking=(device.type == "cuda"))
+        features = extract_features(encoder, video, device)
+        logits = head(features)
+        loss = criterion(logits, labels)
+
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+        batch_size = labels.size(0)
+        loss_sum += loss.item() * batch_size
+        correct += (logits.argmax(dim=1) == labels).sum().item()
+        seen += batch_size
+
+    seen = max(1, seen)
+    return {
+        "loss": loss_sum / seen,
+        "acc": correct / seen,
+        "lr": optimizer.param_groups[0]["lr"],
+    }
 
 
 def main(cfg: dict | None = None) -> None:
@@ -282,6 +342,37 @@ def main(cfg: dict | None = None) -> None:
         f"features.shape={tuple(features.shape)} dtype={features.dtype} "
         f"mean={features.mean().item():.4f} std={features.std().item():.4f}"
     )
+
+    # Step 4: train a linear classifier on the frozen pooled features.
+    probe_cfg = cfg.get("probe", {})
+    epochs = int(probe_cfg.get("epochs", 20))
+    num_classes = len(class_to_idx)
+
+    head = build_linear_head(encoder.embed_dim, num_classes, device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer, scheduler = build_probe_optimizer(
+        head, probe_cfg, steps_per_epoch=len(train_loader), epochs=epochs
+    )
+
+    assert all(not p.requires_grad for p in encoder.parameters()), "encoder must stay frozen"
+    assert any(p.requires_grad for p in head.parameters()), "head must be trainable"
+
+    print(
+        "linear-probe teacher: training head "
+        f"num_classes={num_classes} epochs={epochs} "
+        f"lr={optimizer.param_groups[0]['lr']} "
+        f"momentum={optimizer.param_groups[0]['momentum']} "
+        f"weight_decay={optimizer.param_groups[0]['weight_decay']}"
+    )
+
+    for epoch in range(epochs):
+        stats = train_one_epoch(
+            encoder, head, train_loader, optimizer, criterion, scheduler, device
+        )
+        print(
+            f"linear-probe teacher: epoch {epoch + 1}/{epochs} "
+            f"loss={stats['loss']:.4f} acc={stats['acc']:.4f} lr={stats['lr']:.5f}"
+        )
 
 
 if __name__ == "__main__":
