@@ -213,6 +213,20 @@ def build_probe_loader(
     return DataLoader(dataset, **loader_kwargs), class_to_idx
 
 
+def extract_features(
+    encoder: nn.Module,
+    video: torch.Tensor,
+    device: torch.device,
+) -> torch.Tensor:
+    # encoder is already eval() + requires_grad_(False); inference_mode skips
+    # autograd bookkeeping entirely. Mean over the token dim collapses
+    # (B, N, D) -> (B, D), one vector per video.
+    video = video.to(device, non_blocking=(device.type == "cuda"))
+    with torch.inference_mode():
+        tokens, _ = encoder(video)
+    return tokens.mean(dim=1)
+
+
 def main(cfg: dict | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, default=None)
@@ -259,6 +273,14 @@ def main(cfg: dict | None = None) -> None:
         "linear-probe teacher: first batch "
         f"video.shape={tuple(video.shape)} labels.shape={tuple(labels.shape)} "
         f"labels[:8]={labels[:8].tolist()}"
+    )
+
+    # Step 3 sanity check: encode the batch and pool tokens to one vector per video.
+    features = extract_features(encoder, video, device)
+    print(
+        "linear-probe teacher: pooled features "
+        f"features.shape={tuple(features.shape)} dtype={features.dtype} "
+        f"mean={features.mean().item():.4f} std={features.std().item():.4f}"
     )
 
 
