@@ -288,6 +288,20 @@ def train_one_epoch(
     }
 
 
+def derive_probe_run_name(cfg: dict) -> str:
+    # Convention: .../checkpoints/<id>/{best,last,latest}/checkpoint.pth
+    # Walk up from the file and take the first segment that isn't a reserved
+    # bucket name; falls back to the file stem if the layout is unusual.
+    reserved = {"best", "last", "latest", "checkpoints"}
+    ckpt = Path(cfg["train"]["teacher_checkpoint"]).expanduser()
+    ckpt_id = next(
+        (part for part in reversed(ckpt.parts[:-1]) if part and part not in reserved),
+        ckpt.stem,
+    )
+    arch = cfg.get("model", {}).get("architecture", "encoder")
+    return f"probe-teacher-{arch}-{ckpt_id}"
+
+
 def evaluate(
     encoder: nn.Module,
     head: nn.Module,
@@ -432,6 +446,7 @@ def main(cfg: dict | None = None) -> None:
     best_val_acc = float("-inf")
     best_epoch = -1
 
+    cfg.setdefault("wandb", {}).setdefault("name", derive_probe_run_name(cfg))
     wandb_run = init_wandb_run(cfg, job_type="probe-teacher")
     if wandb_run is not None:
         # shared util only registers train/* — register probe/* against epoch.
