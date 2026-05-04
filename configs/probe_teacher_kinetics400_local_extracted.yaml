@@ -36,7 +36,7 @@ train:
   teacher_checkpoint: /scratch/sd6701/salt/p-salt/results/checkpoints/ba0e9395/best/checkpoint.pth
 
 wandb:
-  enabled: false
+  enabled: true
   project: rethinking-jepa
   tags: [linear-probe, teacher, kinetics400]
   fallback_to_offline: true

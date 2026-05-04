@@ -8,8 +8,8 @@
 #SBATCH --time=02:00:00
 #SBATCH --account=torch_pr_230_tandon_priority
 #SBATCH --job-name=salt_probe_extracted
-#SBATCH --output=/scratch/sd6701/salt/p-salt/logs/probe_teacher_%j.log
-#SBATCH --error=/scratch/sd6701/salt/p-salt/logs/probe_teacher_%j.err
+#SBATCH --output=/scratch/sd6701/salt/p-salt/logs/probe/probe_teacher_%j.log
+#SBATCH --error=/scratch/sd6701/salt/p-salt/logs/probe/probe_teacher_%j.err
 
 set -euo pipefail
 
@@ -27,10 +27,14 @@ conda activate salt
 export LD_LIBRARY_PATH=/scratch/sd6701/miniconda3/envs/salt/lib:${LD_LIBRARY_PATH:-}
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-# Uncomment to enable wandb without editing the yaml.
-# export WANDB_API_KEY=...
-# export WANDB_MODE=online
-# export WANDB_PROJECT=rethinking-jepa
+# wandb: enabled in configs/probe_teacher_kinetics400_local_extracted.yaml.
+# API key resolution order: $WANDB_API_KEY env > ~/.netrc (created by `wandb login`).
+# If neither is present, fallback_to_offline in the yaml lets the run continue.
+export WANDB_MODE="${WANDB_MODE:-online}"
+export WANDB_PROJECT="${WANDB_PROJECT:-rethinking-jepa}"
+if [[ -z "${WANDB_API_KEY:-}" && ! -f "${HOME}/.netrc" ]]; then
+  echo "wandb: no WANDB_API_KEY and no ~/.netrc found; run will fall back to offline mode" >&2
+fi
 
 mkdir -p "${WORKDIR}/logs"
 mkdir -p "${PROBE_CHECKPOINT_DIR}"
