@@ -287,6 +287,67 @@ def train_one_epoch(
     }
 
 
+def evaluate(
+    encoder: nn.Module,
+    head: nn.Module,
+    loader: DataLoader,
+    criterion: nn.Module,
+    device: torch.device,
+) -> dict[str, float]:
+    head.eval()
+    loss_sum = 0.0
+    correct1 = 0
+    correct5 = 0
+    seen = 0
+    with torch.no_grad():
+        for video, labels in loader:
+            labels = labels.to(device, non_blocking=(device.type == "cuda"))
+            features = extract_features(encoder, video, device)
+            logits = head(features)
+            loss = criterion(logits, labels)
+
+            batch_size = labels.size(0)
+            loss_sum += loss.item() * batch_size
+            # top-k against the number of classes; topk(5) on a 4-class probe would crash
+            k = min(5, logits.size(1))
+            topk = logits.topk(k, dim=1).indices
+            match = topk.eq(labels.unsqueeze(1))
+            correct1 += match[:, 0].sum().item()
+            correct5 += match.any(dim=1).sum().item()
+            seen += batch_size
+
+    seen = max(1, seen)
+    return {
+        "loss": loss_sum / seen,
+        "acc": correct1 / seen,
+        "acc5": correct5 / seen,
+    }
+
+
+def save_probe_checkpoint(
+    path: Path,
+    *,
+    epoch: int,
+    head: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    class_to_idx: dict[str, int],
+    best_val_acc: float,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "epoch": epoch,
+            "head_state_dict": head.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "class_to_idx": class_to_idx,
+            "best_val_acc": best_val_acc,
+        },
+        path,
+    )
+
+
 def main(cfg: dict | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, default=None)
@@ -365,14 +426,55 @@ def main(cfg: dict | None = None) -> None:
         f"weight_decay={optimizer.param_groups[0]['weight_decay']}"
     )
 
+    checkpoint_dir = Path(probe_cfg["checkpoint_dir"]).expanduser()
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    best_val_acc = float("-inf")
+    best_epoch = -1
+
     for epoch in range(epochs):
-        stats = train_one_epoch(
+        train_stats = train_one_epoch(
             encoder, head, train_loader, optimizer, criterion, scheduler, device
         )
+        val_stats = evaluate(encoder, head, val_loader, criterion, device)
+
+        improved = val_stats["acc"] > best_val_acc
+        if improved:
+            best_val_acc = val_stats["acc"]
+            best_epoch = epoch + 1
+
         print(
             f"linear-probe teacher: epoch {epoch + 1}/{epochs} "
-            f"loss={stats['loss']:.4f} acc={stats['acc']:.4f} lr={stats['lr']:.5f}"
+            f"train_loss={train_stats['loss']:.4f} train_acc={train_stats['acc']:.4f} "
+            f"val_loss={val_stats['loss']:.4f} val_acc={val_stats['acc']:.4f} "
+            f"val_acc5={val_stats['acc5']:.4f} lr={train_stats['lr']:.5f}"
+            + (" [best]" if improved else "")
         )
+
+        save_probe_checkpoint(
+            checkpoint_dir / "latest.pth",
+            epoch=epoch + 1,
+            head=head,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            class_to_idx=class_to_idx,
+            best_val_acc=best_val_acc,
+        )
+        if improved:
+            save_probe_checkpoint(
+                checkpoint_dir / "best.pth",
+                epoch=epoch + 1,
+                head=head,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                class_to_idx=class_to_idx,
+                best_val_acc=best_val_acc,
+            )
+
+    print(
+        f"linear-probe teacher: training done "
+        f"best_val_acc={best_val_acc:.4f} best_epoch={best_epoch} "
+        f"checkpoint_dir={checkpoint_dir}"
+    )
 
 
 if __name__ == "__main__":

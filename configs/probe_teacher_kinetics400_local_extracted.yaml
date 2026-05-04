@@ -30,6 +30,7 @@ probe:
   lr: 0.1
   momentum: 0.9
   weight_decay: 0.0
+  checkpoint_dir: /scratch/sd6701/salt/p-salt/results/probe_checkpoints/teacher_ba0e9395
 
 train:
   teacher_checkpoint: /scratch/sd6701/salt/p-salt/results/checkpoints/ba0e9395/best/checkpoint.pth
