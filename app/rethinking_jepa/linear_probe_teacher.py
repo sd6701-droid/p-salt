@@ -22,6 +22,7 @@ from app.rethinking_jepa.utils import build_teacher_from_cfg, resolve_device
 from src.datasets.data_manager import _load_manifest_paths
 from src.datasets.video_dataset import VideoAugmentationConfig, VideoFileDataset
 from src.utils import load_config
+from src.utils.wandb import finish_wandb_run, init_wandb_run, log_wandb_metrics
 
 
 def checkpoint_path_from_args(args: argparse.Namespace) -> Path:
@@ -431,6 +432,12 @@ def main(cfg: dict | None = None) -> None:
     best_val_acc = float("-inf")
     best_epoch = -1
 
+    wandb_run = init_wandb_run(cfg, job_type="probe-teacher")
+    if wandb_run is not None:
+        # shared util only registers train/* — register probe/* against epoch.
+        wandb_run.define_metric("probe/epoch")
+        wandb_run.define_metric("probe/*", step_metric="probe/epoch")
+
     for epoch in range(epochs):
         train_stats = train_one_epoch(
             encoder, head, train_loader, optimizer, criterion, scheduler, device
@@ -448,6 +455,20 @@ def main(cfg: dict | None = None) -> None:
             f"val_loss={val_stats['loss']:.4f} val_acc={val_stats['acc']:.4f} "
             f"val_acc5={val_stats['acc5']:.4f} lr={train_stats['lr']:.5f}"
             + (" [best]" if improved else "")
+        )
+
+        log_wandb_metrics(
+            wandb_run,
+            {
+                "probe/epoch": epoch + 1,
+                "probe/lr": train_stats["lr"],
+                "probe/train_loss": train_stats["loss"],
+                "probe/train_acc": train_stats["acc"],
+                "probe/val_loss": val_stats["loss"],
+                "probe/val_acc": val_stats["acc"],
+                "probe/val_acc5": val_stats["acc5"],
+                "probe/best_val_acc": best_val_acc,
+            },
         )
 
         save_probe_checkpoint(
@@ -474,6 +495,15 @@ def main(cfg: dict | None = None) -> None:
         f"linear-probe teacher: training done "
         f"best_val_acc={best_val_acc:.4f} best_epoch={best_epoch} "
         f"checkpoint_dir={checkpoint_dir}"
+    )
+
+    finish_wandb_run(
+        wandb_run,
+        summary={
+            "probe/best_val_acc": best_val_acc,
+            "probe/best_epoch": best_epoch,
+            "probe/checkpoint_dir": str(checkpoint_dir),
+        },
     )
 
 
