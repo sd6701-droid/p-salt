@@ -21,6 +21,7 @@ class MaskCollator(object):
         super(MaskCollator, self).__init__()
 
         self.mask_generators = dict()
+        # this multiple for loop indicate that for every frame we apply a short and long mask
         for fpc in dataset_fpcs:
             self.mask_generators[fpc] = []
             for m in cfgs_mask:
