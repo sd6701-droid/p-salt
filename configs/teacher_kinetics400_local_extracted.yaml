@@ -44,11 +44,11 @@ optimizer:
   start_weight_decay: 0.05
   end_weight_decay: 0.05
   clip_grad: 0.5
-  warmup_steps: 600
+  warmup_steps: 100
   betas: [0.9, 0.95]
 
 wandb:
-  enabled: false
+  enabled: true
   project: rethinking-jepa
   mode: online
   init_timeout: 180
@@ -66,5 +66,5 @@ train:
   debug_steps: 5
   precision: bf16
   steps_per_epoch_scale: 1
-  max_steps: 12000
+  max_steps: 35000
   checkpoint_path: results/checkpoints/teacher_vit_small_kinetics400_local_extracted_subset2.pt
