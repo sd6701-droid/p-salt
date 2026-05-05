@@ -58,7 +58,7 @@ train:
   accumulation_steps: 1
   num_workers: 12
   prefetch_factor: 6
-  checkpoint_interval: 100
+  checkpoint_interval: 10
   log_interval: 10
   debug_steps: 5
   precision: bf16
