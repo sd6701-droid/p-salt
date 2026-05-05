@@ -18,7 +18,7 @@ export LD_LIBRARY_PATH=/scratch/sd6701/miniconda3/envs/salt/lib:$LD_LIBRARY_PATH
 export WANDB_MODE=online
 export WANDB__SERVICE_WAIT=300
 
-mkdir -p /scratch/sd6701/salt/p-salt/logs
+mkdir -p /scratch/sd6701/salt/p-salt/random_mask/logs
 
 export VJEPA_DEBUG_MASK_COUNTS=1
 
