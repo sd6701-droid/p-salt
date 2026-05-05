@@ -415,6 +415,8 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
     seed = int(meta_cfg.get("seed", train_cfg.get("seed", 0)))
     set_random_seed(seed)
     set_multiprocessing_start_method()
+    # Input shapes are fixed across steps (B, 3, T, H, W); let cuDNN pick the fastest conv kernel.
+    torch.backends.cudnn.benchmark = True
     device, rank, world_size, local_rank, is_main = init_distributed()
 
     model, _ = build_teacher_from_cfg(cfg, device)
