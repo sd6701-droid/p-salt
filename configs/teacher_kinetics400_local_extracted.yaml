@@ -53,8 +53,8 @@ wandb:
   mode: online
   init_timeout: 180
   fallback_to_offline: true
-  name: teacher-vit-small-kinetics400-random85
-  tags: [teacher, kinetics400, local, extracted, vit-small]
+  name: teacher-vit-small-kinetics400-random85-decord
+  tags: [teacher, kinetics400, local, extracted, vit-small, decord]
 
 train:
   device_batch_size: 16

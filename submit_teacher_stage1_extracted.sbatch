@@ -23,7 +23,7 @@ conda activate salt
 
 export LD_LIBRARY_PATH=/scratch/sd6701/miniconda3/envs/salt/lib:${LD_LIBRARY_PATH:-}
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export WANDB_MODE=online
+export=online
 export WANDB__SERVICE_WAIT=300
 
 mkdir -p "${WORKDIR}/logs"

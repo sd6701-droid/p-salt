@@ -222,15 +222,35 @@ def _read_video_clip_with_av(
     return torch.stack(selected, dim=0)
 
 
+def _resolve_video_backend() -> str:
+    backend = os.environ.get("VJEPA_VIDEO_BACKEND", "auto").strip().lower()
+    if backend not in {"auto", "decord", "pyav"}:
+        return "auto"
+    return backend
+
+
 def _read_video_clip(
     path: str | Path,
     *,
     frames: int,
     frame_step: int,
 ) -> torch.Tensor:
-    clip = _read_video_clip_with_av(path, frames=frames, frame_step=frame_step)
-    if clip is not None:
-        return clip
+    backend = _resolve_video_backend()
+
+    if backend in {"auto", "decord"}:
+        clip = _read_video_clip_with_decord(path, frames=frames, frame_step=frame_step)
+        if clip is not None:
+            return clip
+        if backend == "decord":
+            raise RuntimeError(
+                f"VJEPA_VIDEO_BACKEND=decord but decord failed to decode '{path}'. "
+                "Install decord or unset the env var to allow PyAV fallback."
+            )
+
+    if backend in {"auto", "pyav"}:
+        clip = _read_video_clip_with_av(path, frames=frames, frame_step=frame_step)
+        if clip is not None:
+            return clip
 
     video = _read_video_frames(path)
     indices = _sample_frame_indices(int(video.size(0)), frames, frame_step)
@@ -243,13 +263,24 @@ def _read_video_clip_with_decord(
     frames: int,
     frame_step: int,
 ) -> torch.Tensor | None:
+    # decord deadlocks under multiprocessing fork; teacher_train uses spawn (see
+    # set_multiprocessing_start_method). Do not switch back to fork without
+    # validating decord behavior first.
     try:
         from decord import VideoReader, cpu
     except ImportError:
         return None
 
+    # Per-worker thread count. With DataLoader workers already parallelizing
+    # across videos, more than 1-2 threads per VideoReader oversubscribes the
+    # CPU and hurts throughput. Override via VJEPA_DECORD_THREADS if needed.
     try:
-        vr = VideoReader(str(path), num_threads=-1, ctx=cpu(0))
+        num_threads = max(1, int(os.environ.get("VJEPA_DECORD_THREADS", "1")))
+    except ValueError:
+        num_threads = 1
+
+    try:
+        vr = VideoReader(str(path), num_threads=num_threads, ctx=cpu(0))
         total_frames = len(vr)
         if total_frames <= 0:
             return None

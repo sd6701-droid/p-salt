@@ -21,5 +21,6 @@ export WANDB__SERVICE_WAIT=300
 mkdir -p /scratch/sd6701/salt/p-salt/random_mask/logs
 
 export VJEPA_DEBUG_MASK_COUNTS=1
+export VJEPA_VIDEO_BACKEND=decord                                              
 
 python3 app/main.py --config configs/teacher_kinetics400_local_extracted.yaml
