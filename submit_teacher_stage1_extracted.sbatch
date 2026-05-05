@@ -5,11 +5,11 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=120G
-#SBATCH --time=04:00:00
+#SBATCH --time=08:00:00
 #SBATCH --account=torch_pr_230_tandon_priority
 #SBATCH --job-name=salt_teacher_extracted
-#SBATCH --output=/scratch/sd6701/salt/p-salt/logs/teacher_extracted_%j.log
-#SBATCH --error=/scratch/sd6701/salt/p-salt/logs/teacher_extracted_%j.err
+#SBATCH --output=/scratch/sd6701/salt/p-salt/random_mask/logs/teacher_extracted_%j.log
+#SBATCH --error=/scratch/sd6701/salt/p-salt/random_mask/logs/teacher_extracted_%j.err
 
 set -euo pipefail
 
@@ -23,6 +23,8 @@ conda activate salt
 
 export LD_LIBRARY_PATH=/scratch/sd6701/miniconda3/envs/salt/lib:${LD_LIBRARY_PATH:-}
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export WANDB_MODE=online
+export WANDB__SERVICE_WAIT=300
 
 mkdir -p "${WORKDIR}/logs"
 
