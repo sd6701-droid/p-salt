@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import math
+import os
 from multiprocessing import Value
 
 import torch
 
 from .types import IndexedMaskSet
+
+
+def _debug_mask_counts_enabled() -> bool:
+    return os.environ.get("VJEPA_DEBUG_MASK_COUNTS", "").lower() in {"1", "true", "yes", "on"}
 
 
 class MaskCollator(object):
@@ -79,9 +84,102 @@ class MaskCollator(object):
                 masks_enc, masks_pred = mask_generator(batch_size)
                 collated_masks_enc.append(masks_enc)
                 collated_masks_pred.append(masks_pred)
+
+            if _debug_mask_counts_enabled():
+                gen0 = self.mask_generators[fpc][0]
+                total_tokens_per_video = gen0.duration * gen0.height * gen0.width
+                view_names = (
+                    ["short", "long"]
+                    if len(collated_masks_pred) == 2
+                    else [f"view_{idx}" for idx in range(len(collated_masks_pred))]
+                )
+                masked_parts = " ".join(
+                    f"{view_names[idx]}_masked_per_video={pred.shape[-1] if pred.ndim > 0 else 0}"
+                    for idx, pred in enumerate(collated_masks_pred)
+                )
+                print(
+                    f"mask_collator: batch={batch_size} fpc={fpc} "
+                    f"total_tokens_per_video={total_tokens_per_video} {masked_parts}",
+                    flush=True,
+                )
+
             fpc_collations += [
                 (collated_batch, collated_masks_enc, collated_masks_pred)
             ]
+
+        return fpc_collations
+
+
+class RandomTokenMaskCollator(object):
+    """Drop-in replacement for MaskCollator that emits a single-view random mask.
+
+    Returns the same shape as MaskCollator: a list of
+    (collated_batch, [masks_enc], [masks_pred]) per fpc, where each masks_*
+    list has length 1. Each per-sample tensor is the *index list* (not bool)
+    so it matches what TeacherModel.forward expects via IndexedMaskSet.
+    """
+
+    def __init__(
+        self,
+        *,
+        num_tokens: int,
+        mask_ratio: float,
+        dataset_fpcs,
+    ) -> None:
+        if not 0.0 < mask_ratio < 1.0:
+            raise ValueError(f"mask_ratio must be in (0, 1), got {mask_ratio}")
+        self.num_tokens = int(num_tokens)
+        self.n_masked = max(1, min(self.num_tokens - 1, int(self.num_tokens * mask_ratio)))
+        self.n_visible = self.num_tokens - self.n_masked
+        self.mask_ratio = float(mask_ratio)
+        self.dataset_fpcs = list(dataset_fpcs)
+
+    def step(self):
+        # parity with MaskCollator.step() — random masking has no replay state.
+        return None
+
+    def __call__(self, batch):
+        filtered = {fpc: [] for fpc in self.dataset_fpcs}
+        for sample in batch:
+            if len(sample) >= 3 and isinstance(sample[-1], (list, tuple)):
+                try:
+                    fpc = len(sample[-1][-1])
+                except (TypeError, IndexError):
+                    fpc = 1
+            else:
+                fpc = 1
+            if fpc in filtered:
+                filtered[fpc].append(sample)
+
+        fpc_collations = []
+        for fpc in self.dataset_fpcs:
+            fpc_batch = filtered[fpc]
+            batch_size = len(fpc_batch)
+            if batch_size == 0:
+                continue
+            collated_batch = torch.utils.data.default_collate(fpc_batch)
+
+            visible_per_sample, masked_per_sample = [], []
+            for _ in range(batch_size):
+                perm = torch.randperm(self.num_tokens)
+                masked_idx, _ = torch.sort(perm[: self.n_masked])
+                visible_idx, _ = torch.sort(perm[self.n_masked :])
+                masked_per_sample.append(masked_idx)
+                visible_per_sample.append(visible_idx)
+
+            collated_masks_enc = [torch.utils.data.default_collate(visible_per_sample)]
+            collated_masks_pred = [torch.utils.data.default_collate(masked_per_sample)]
+
+            if _debug_mask_counts_enabled():
+                masked_n = collated_masks_pred[0].shape[-1]
+                print(
+                    f"mask_collator: batch={batch_size} fpc={fpc} "
+                    f"total_tokens_per_video={self.num_tokens} "
+                    f"random_masked_per_video={masked_n}",
+                    flush=True,
+                )
+
+            fpc_collations.append((collated_batch, collated_masks_enc, collated_masks_pred))
 
         return fpc_collations
 

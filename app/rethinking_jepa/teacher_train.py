@@ -27,7 +27,7 @@ if __package__ in (None, ""):
     from src.datasets.video_data_manager import init_data
     from src.datasets.video_dataset import VideoAugmentationConfig, random_resized_crop_video
     from src.masks.types import IndexedMaskSet
-    from src.masks.vjepa_style_masking import MaskCollator
+    from src.masks.vjepa_style_masking import MaskCollator, RandomTokenMaskCollator
     from src.utils import (
         checkpoint_paths,
         finish_wandb_run,
@@ -42,7 +42,7 @@ else:
     from src.datasets.video_data_manager import init_data
     from src.datasets.video_dataset import VideoAugmentationConfig, random_resized_crop_video
     from src.masks.types import IndexedMaskSet
-    from src.masks.vjepa_style_masking import MaskCollator
+    from src.masks.vjepa_style_masking import MaskCollator, RandomTokenMaskCollator
     from src.utils import (
         checkpoint_paths,
         finish_wandb_run,
@@ -159,19 +159,30 @@ def mask_strategy_name(mask_cfg: dict[str, Any]) -> str:
 def describe_mask_cfgs(mask_cfgs: list[dict[str, Any]]) -> str:
     parts = []
     for view_idx, cfg in enumerate(mask_cfgs):
-        parts.append(
-            f"view={view_idx} "
-            f"blocks={cfg.get('num_blocks')} "
-            f"spatial_scale={cfg.get('spatial_scale')} "
-            f"temporal_scale={cfg.get('temporal_scale')} "
-            f"aspect_ratio={cfg.get('aspect_ratio')}"
-        )
+        if "mask_ratio" in cfg and "num_blocks" not in cfg:
+            parts.append(
+                f"view={view_idx} strategy={cfg.get('strategy')} "
+                f"mask_ratio={cfg.get('mask_ratio')}"
+            )
+        else:
+            parts.append(
+                f"view={view_idx} "
+                f"blocks={cfg.get('num_blocks')} "
+                f"spatial_scale={cfg.get('spatial_scale')} "
+                f"temporal_scale={cfg.get('temporal_scale')} "
+                f"aspect_ratio={cfg.get('aspect_ratio')}"
+            )
     return "; ".join(parts)
 
 
 def mask_view_names(mask_cfgs: list[dict[str, Any]]) -> list[str]:
     if len(mask_cfgs) == 2:
         return ["short", "long"]
+    if len(mask_cfgs) == 1:
+        strategy = str(mask_cfgs[0].get("strategy", "")).lower()
+        if strategy in {"random", "random_token", "token"}:
+            return ["random"]
+        return ["view_0"]
     return [f"view_{idx}" for idx in range(len(mask_cfgs))]
 
 
@@ -414,14 +425,31 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
         device_ids = [device.index] if device.type == "cuda" else None
         model = DistributedDataParallel(model, device_ids=device_ids)
 
-    mask_cfgs = build_mask_cfgs(mask_cfg)
-    mask_collator = MaskCollator(
-        cfgs_mask=mask_cfgs,
-        dataset_fpcs=list(data_cfg.get("dataset_fpcs", [int(data_cfg["frames"])])),
-        crop_size=(int(data_cfg["input_size"]), int(data_cfg["input_size"])),
-        patch_size=(int(cfg["model"]["patch_size"]), int(cfg["model"]["patch_size"])),
-        tubelet_size=int(cfg["model"]["tubelet_size"]),
+    tokens_per_sample = int(
+        (int(data_cfg["frames"]) // int(cfg["model"]["tubelet_size"]))
+        * (int(data_cfg["input_size"]) // int(cfg["model"]["patch_size"]))
+        * (int(data_cfg["input_size"]) // int(cfg["model"]["patch_size"]))
     )
+    strategy = str(mask_cfg.get("strategy", "multiseq_multiblock3d")).lower()
+    random_strategies = {"random", "random_token", "token"}
+
+    if strategy in random_strategies:
+        mask_ratio = float(mask_cfg.get("mask_ratio", mask_cfg.get("random_mask_ratio", 0.75)))
+        mask_cfgs = [{"strategy": "random", "mask_ratio": mask_ratio}]
+        mask_collator = RandomTokenMaskCollator(
+            num_tokens=tokens_per_sample,
+            mask_ratio=mask_ratio,
+            dataset_fpcs=list(data_cfg.get("dataset_fpcs", [int(data_cfg["frames"])])),
+        )
+    else:
+        mask_cfgs = build_mask_cfgs(mask_cfg)
+        mask_collator = MaskCollator(
+            cfgs_mask=mask_cfgs,
+            dataset_fpcs=list(data_cfg.get("dataset_fpcs", [int(data_cfg["frames"])])),
+            crop_size=(int(data_cfg["input_size"]), int(data_cfg["input_size"])),
+            patch_size=(int(cfg["model"]["patch_size"]), int(cfg["model"]["patch_size"])),
+            tubelet_size=int(cfg["model"]["tubelet_size"]),
+        )
 
     print('mask_collator--->', mask_collator)
     data_loader, dist_sampler = init_data(
@@ -503,11 +531,6 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
         ],
     )
     wandb_run = init_wandb_run(cfg, job_type="teacher-train") if is_main else None
-    tokens_per_sample = int(
-        (int(data_cfg["frames"]) // int(cfg["model"]["tubelet_size"]))
-        * (int(data_cfg["input_size"]) // int(cfg["model"]["patch_size"]))
-        * (int(data_cfg["input_size"]) // int(cfg["model"]["patch_size"]))
-    )
 
     step = 0
     epoch = 0
