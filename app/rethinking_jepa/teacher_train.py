@@ -494,6 +494,7 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
 
     accumulation_steps = int(train_cfg.get("accumulation_steps", 1))
     checkpoint_interval = int(train_cfg.get("checkpoint_interval", 100))
+    epoch_checkpoint_interval = int(train_cfg.get("epoch_checkpoint_interval", 5))
     log_interval = int(train_cfg.get("log_interval", 10))
     clip_grad = float(optimizer_cfg.get("clip_grad", 1.0))
     best_checkpoint_path, last_checkpoint_path = checkpoint_paths(cfg)
@@ -780,6 +781,26 @@ def run(cfg: dict[str, Any], *, resume_preempt: bool = False) -> None:
                 accumulated_prediction_sum = 0.0
                 accumulated_prediction_sumsq = 0.0
                 accumulated_prediction_numel = 0
+
+        if (
+            is_main
+            and epoch_checkpoint_interval > 0
+            and epoch % epoch_checkpoint_interval == 0
+        ):
+            save_training_state(
+                path=latest_path,
+                model=model,
+                optimizer=optimizer,
+                scaler=scaler,
+                step=step,
+                epoch=epoch,
+                loss=last_loss,
+                best_loss=best_loss,
+            )
+            save_teacher_checkpoint(model, last_checkpoint_path)
+            print(
+                f"teacher_train epoch-checkpoint saved epoch={epoch} step={step} path={latest_path}"
+            )
 
     if is_main:
         save_training_state(
